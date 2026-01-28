@@ -1,0 +1,24 @@
+services:
+  # Combined Discord AXON - runs both server and bot in one container
+  discord-axon:
+    build:
+      context: ..
+      dockerfile: discord-axon/Dockerfile
+    container_name: discord-axon
+    ports:
+      - "8080:8080"   # HTTP API / Module serving
+      - "8081:8081"   # WebSocket for connectome clients
+      - "3000:3000"   # Debug interface
+    volumes:
+      # Mount config and env files
+      - ./.env:/workspace/discord-axon/.env:ro
+      - ./config.json:/workspace/discord-axon/config.json:ro
+      # Mount state directory for persistence
+      - ./discord-state:/workspace/discord-axon/discord-state
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge

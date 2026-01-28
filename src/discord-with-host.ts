@@ -10,15 +10,13 @@
 
 import { config as dotenvConfig } from 'dotenv';
 
-// Import core-components to ensure all core components are registered
-import 'connectome-ts/src/core-components';
-
-import { ConnectomeHost } from 'connectome-ts/src/host';
-import { DiscordApplication } from './discord-app';
-import { AnthropicProvider } from 'connectome-ts/src/llm/anthropic-provider';
-import { MockLLMProvider } from 'connectome-ts/src/llm/mock-llm-provider';
-import { DebugLLMProvider } from 'connectome-ts/src/llm/debug-llm-provider';
-import { BoxTestMockProvider } from 'connectome-ts/src/llm/box-test-mock-provider';
+import {
+  ConnectomeHost,
+  AnthropicProvider,
+  MockLLMProvider,
+  DebugLLMProvider
+} from 'connectome-ts';
+import { DiscordApplication } from './discord-app.js';
 import { join } from 'path';
 import * as yaml from 'js-yaml';
 import * as fs from 'fs';
@@ -52,7 +50,7 @@ async function main() {
   
   if (useBoxTest) {
     console.log('🧪 Using Box Test Mock provider (simulates createBox action calls)');
-    llmProvider = new BoxTestMockProvider();
+    llmProvider = new MockLLMProvider();
   } else if (useDebugLLM) {
     console.log('🧪 Using Debug LLM provider (manual UI mode)');
     llmProvider = new DebugLLMProvider({ description: 'Discord Bot Debug Mode' });

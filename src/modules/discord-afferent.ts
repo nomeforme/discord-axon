@@ -14,7 +14,8 @@ interface DiscordConfig {
   serverUrl: string;
   guild: string;
   agent: string;
-  botToken?: string;
+  botId?: string;       // Which bot to connect as
+  botToken?: string;    // Keep for backwards compat (legacy single-bot)
   scrollbackLimit?: number;
 }
 
@@ -59,6 +60,11 @@ export function createModule(env: IAxonEnvironment): any {
     private channelNamesCache: Record<string, string> = {};
     private lastReadCache: Record<string, string> = {};
 
+    // Bot ID for multi-bot support
+    private currentBotId?: string;
+    private currentBotUserId?: string;
+    private currentBotUsername?: string;
+
     // Called by AxonLoader when parameters are provided
     async setConnectionParams(params: any): Promise<void> {
       console.log('[DiscordAfferent] Setting connection params:', params);
@@ -69,6 +75,12 @@ export function createModule(env: IAxonEnvironment): any {
         console.log('[DiscordAfferent] Bot token received from params');
       }
 
+      // Store botId for multi-bot support
+      if (params.botId) {
+        this.currentBotId = params.botId;
+        console.log(`[DiscordAfferent] Bot ID: ${params.botId}`);
+      }
+
       // Create context for AXON-loaded afferents
       if (!this.context) {
         (this as any).context = {
@@ -76,6 +88,7 @@ export function createModule(env: IAxonEnvironment): any {
             serverUrl: params.host && params.path ? `ws://${params.host}${params.path}` : '',
             guild: params.guild || '',
             agent: params.agent || 'Connectome Agent',
+            botId: params.botId || '',  // Include botId in config
             scrollbackLimit: 50
           },
           afferentId: 'discord-afferent',
@@ -314,7 +327,8 @@ export function createModule(env: IAxonEnvironment): any {
             type: 'auth',
             token: this.botToken,
             guild: config.guild || config.guildId,
-            agent: config.agent || config.agentName
+            agent: config.agent || config.agentName,
+            botId: config.botId || this.currentBotId  // Include botId for multi-bot support
           }));
         };
         
@@ -388,9 +402,16 @@ export function createModule(env: IAxonEnvironment): any {
       switch (msg.type) {
         case 'authenticated':
           this.connectionAttempts = 0;
-          
+
+          // Store this connection's bot identity
+          this.currentBotId = msg.botId;
+          this.currentBotUserId = msg.botUserId;
+          this.currentBotUsername = msg.botUsername;
+
+          console.log(`[DiscordAfferent] Authenticated as bot: ${msg.botId} (${msg.botUsername})`);
+
           const config = this.getComponentState();
-          
+
           // Emit connection event
           this.emit({
             topic: 'discord:connected',
@@ -399,13 +420,14 @@ export function createModule(env: IAxonEnvironment): any {
             payload: {
               agentName: config.agent || config.agentName,
               guildId: config.guild || config.guildId,
+              botId: msg.botId,
               botUserId: msg.botUserId,
               botUsername: msg.botUsername,
               botDisplayName: msg.botDisplayName,
               reconnect: this.connectionAttempts > 1
             }
           });
-          
+
           // Auto-join configured channels after authentication
           if (config.autoJoinChannels && Array.isArray(config.autoJoinChannels)) {
             console.log(`[DiscordAfferent] Auto-joining ${config.autoJoinChannels.length} channels...`);
@@ -825,6 +847,9 @@ export function createModule(env: IAxonEnvironment): any {
     toJSON() {
       return {
         type: 'DiscordAfferent',
+        botId: this.currentBotId,
+        botUserId: this.currentBotUserId,
+        botUsername: this.currentBotUsername,
         connected: !!this.ws,
         reconnecting: !!this.reconnectTimeout,
         joinedChannels: this.joinedChannelsCache.length,

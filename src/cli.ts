@@ -27,7 +27,7 @@ async function main() {
     );
     
     await server.init();
-    await server.start(config.botToken);
+    await server.startSingleBot(config.botToken);
   } catch (error) {
     console.error('❌ Failed to start server:', error instanceof Error ? error.message : error);
     process.exit(1);

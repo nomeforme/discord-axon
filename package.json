@@ -24,13 +24,17 @@
   "author": "Connectome Team",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@connectome/axon-interfaces": "file:../connectome-axon-interfaces",
     "@connectome/axon-server": "file:../axon-server",
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.7.9",
     "connectome-ts": "file:../connectome-ts",
     "discord.js": "^14.16.3",
     "dotenv": "^17.2.2",
     "express": "^4.21.2",
     "js-yaml": "^4.1.0",
+    "node-fetch": "^2.7.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -39,6 +43,7 @@
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
+    "@types/node-fetch": "^2.6.12",
     "@types/ws": "^8.5.13",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",

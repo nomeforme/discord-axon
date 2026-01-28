@@ -4,27 +4,46 @@
  * FLEX Architecture - All components extend Component directly with explicit constraints.
  */
 
-import { ConnectomeApplication } from 'connectome-ts/src/host/types';
-import { Space } from 'connectome-ts/src/spaces/space';
-import { VEILStateManager } from 'connectome-ts/src/veil/veil-state';
-import { ComponentRegistry } from 'connectome-ts/src/persistence/component-registry';
-import { AgentComponent } from 'connectome-ts/src/agent/agent-component';
-import { persistable, persistent } from 'connectome-ts/src/persistence/decorators';
-import { Component } from 'connectome-ts/src/spaces/component';
-import { SpaceEvent, ExecutionContext } from 'connectome-ts/src/spaces/types';
-import { ComponentManager } from 'connectome-ts/src/spaces/component-manager';
-import { AxonLoaderComponent } from 'connectome-ts/src/components/axon-loader';
-import type { Facet, ReadonlyVEILState } from 'connectome-ts/src';
-import { updateStateFacets } from 'connectome-ts/src/helpers/factories';
-import { priorityConstraint, ComponentPriority } from 'connectome-ts/src/spaces/constraints';
+import type { ConnectomeApplication } from 'connectome-ts';
+import {
+  Space,
+  VEILStateManager,
+  ComponentRegistry,
+  AgentComponent,
+  persistable,
+  persistent,
+  Component,
+  ComponentManager,
+  AxonLoaderComponent,
+  updateStateFacets,
+  priorityConstraint,
+  ComponentPriority,
+  createAgentActivation
+} from 'connectome-ts';
+import type { SpaceEvent, ExecutionContext, Facet, ReadonlyVEILState } from 'connectome-ts';
+
+export interface DiscordBotConfig {
+  agentName: string;
+  botId: string;
+  systemPrompt: string;
+  token: string;
+  guild?: string;
+  autoJoinChannels?: string[];
+}
 
 export interface DiscordAppConfig {
   agentName: string;
   systemPrompt: string;
   llmProviderId: string;
+  botId?: string;        // Which bot to use (for multi-bot support)
+  botToken?: string;     // Bot token (backwards compat)
+  skipAgentComponent?: boolean;  // Skip creating AgentComponent (use ToolLoopAgent instead)
+  // Multi-bot support: array of bot configs
+  bots?: DiscordBotConfig[];
   discord: {
     host: string;
     guild: string;
+    botId?: string;      // Which bot to use (passed to afferent)
     modulePort?: number;
     autoJoinChannels?: string[];
   };
@@ -71,24 +90,51 @@ class DiscordMessageReceptor extends Component {
     console.log('[DiscordMessageReceptor] Processing discord:connected event');
     const payload = event.payload as any;
 
-    // Store bot user ID in a persistent config facet for easy access
-    if (payload.botUserId) {
-      console.log(`[DiscordMessageReceptor] Storing bot user ID: ${payload.botUserId}`);
-      for (const delta of updateStateFacets('discord-config', { botUserId: payload.botUserId }, state)) {
+    // Multi-bot support: Store bot user ID -> agent name mapping
+    // Each bot connection adds to the map, not replaces
+    if (payload.botUserId && payload.botId) {
+      const agentName = payload.botId;  // botId is the agent name in our config
+      console.log(`[DiscordMessageReceptor] Storing bot mapping: ${payload.botUserId} -> ${agentName}`);
+
+      // Get existing bot map or create new one
+      const existingMapFacet = state.facets.get('discord-config-botUserMap');
+      const existingMap = existingMapFacet?.state?.value || {};
+
+      // Add this bot to the map
+      const updatedMap = {
+        ...existingMap,
+        [payload.botUserId]: {
+          agentName,
+          botId: payload.botId,
+          username: payload.botUsername,
+          displayName: payload.botDisplayName
+        }
+      };
+
+      for (const delta of updateStateFacets('discord-config', { botUserMap: updatedMap }, state)) {
         this.addOperation(delta);
+      }
+
+      // Also keep single botUserId for backwards compat (first bot to connect)
+      if (!existingMapFacet) {
+        for (const delta of updateStateFacets('discord-config', { botUserId: payload.botUserId }, state)) {
+          this.addOperation(delta);
+        }
       }
     }
 
-    // Emit identity system prompt with actual bot name from Discord
+    // Emit identity system prompt with actual bot name from Discord (per bot)
     const botName = payload.botDisplayName || payload.botUsername || payload.agentName;
-    if (botName) {
-      console.log(`[DiscordMessageReceptor] Emitting identity facet for bot: ${botName}`);
+    const agentName = payload.botId || payload.agentName;
+    if (botName && agentName) {
+      console.log(`[DiscordMessageReceptor] Emitting identity facet for bot: ${botName} (agent: ${agentName})`);
       this.addOperation({
         type: 'addFacet',
         facet: {
-          id: 'system-prompt:identity',
+          id: `system-prompt:identity:${agentName}`,
           type: 'ambient',
-          content: `You are connected to Discord as ${botName}.`
+          content: `You are connected to Discord as ${botName}.`,
+          agentId: agentName  // Associate with specific agent
         }
       });
     }
@@ -97,9 +143,9 @@ class DiscordMessageReceptor extends Component {
     this.addOperation({
       type: 'addFacet',
       facet: {
-        id: `discord-connected-${Date.now()}`,
+        id: `discord-connected-${payload.botId || 'default'}-${Date.now()}`,
         type: 'event',
-        content: 'Discord connected',
+        content: `Discord connected (${payload.botId || 'default'})`,
         state: {
           source: 'discord',
           eventType: 'discord-connected'
@@ -124,12 +170,16 @@ class DiscordMessageReceptor extends Component {
 
     console.log(`[DiscordMessageReceptor] Processing message from ${author}: "${content}"${reply ? ' (reply)' : ''}`);
 
-    // Retrieve bot user ID from VEIL state
-    const botConfigFacet = state.facets.get('discord-config-botUserId');
-    const botUserId = botConfigFacet?.state?.value;
+    // Retrieve bot user map from VEIL state (multi-bot support)
+    const botMapFacet = state.facets.get('discord-config-botUserMap');
+    const botUserMap: Record<string, { agentName: string; botId: string; username: string; displayName: string }> = botMapFacet?.state?.value || {};
 
-    if (!botUserId) {
-      console.warn('[DiscordMessageReceptor] Bot user ID not found in VEIL state, skipping activation checks');
+    // Fallback to single botUserId for backwards compat
+    const singleBotFacet = state.facets.get('discord-config-botUserId');
+    const singleBotUserId = singleBotFacet?.state?.value;
+
+    if (Object.keys(botUserMap).length === 0 && !singleBotUserId) {
+      console.warn('[DiscordMessageReceptor] No bot user IDs found in VEIL state, skipping activation checks');
     }
 
     // Format content with reply syntax if this is a reply
@@ -163,10 +213,11 @@ class DiscordMessageReceptor extends Component {
       }
     };
 
-    // If this is from the bot itself, mark it as agent-generated
-    if (authorId === botUserId) {
-      speechFacet.agentId = 'connectome';
-      speechFacet.agentName = 'Connectome';
+    // If this is from any of our bots, mark it as agent-generated
+    const botInfo = botUserMap[authorId];
+    if (botInfo || authorId === singleBotUserId) {
+      speechFacet.agentId = botInfo?.agentName || 'connectome';
+      speechFacet.agentName = botInfo?.displayName || botInfo?.username || 'Connectome';
     }
 
     // Create message facet with speech nested inside
@@ -192,34 +243,66 @@ class DiscordMessageReceptor extends Component {
       this.addOperation(delta);
     }
 
-    // Activate agent if the bot is mentioned or replied to
-    if (botUserId) {
+    // Multi-bot activation: Check which bot(s) are mentioned or replied to
+    const activatePattern = /<activate\s+([^>]+)>/i;
+    const activateMatch = rawContent?.match(activatePattern);
+    const fallbackActivate = activateMatch !== null && activateMatch !== undefined;
+
+    // Debug: Log the bot map and mentions
+    console.log(`[DiscordMessageReceptor] Bot user map:`, JSON.stringify(botUserMap));
+    console.log(`[DiscordMessageReceptor] Mentions:`, JSON.stringify(mentions));
+
+    // Collect all bots that should be activated
+    const botsToActivate: Array<{ agentName: string; reason: string }> = [];
+
+    // Check each bot in the map
+    for (const [botUserId, botInfo] of Object.entries(botUserMap)) {
       const botMentioned = mentions?.users?.some((u: any) => u.id === botUserId);
       const replyingToBot = reply?.authorId === botUserId;
-      const activatePattern = /<activate\s+([^>]+)>/i;
-      const activateMatch = rawContent?.match(activatePattern);
-      const fallbackActivate = activateMatch !== null && activateMatch !== undefined;
+      console.log(`[DiscordMessageReceptor] Checking bot ${botInfo.agentName} (${botUserId}): mentioned=${botMentioned}, replyingTo=${replyingToBot}`);
+
+      if (botMentioned) {
+        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_mentioned' });
+      } else if (replyingToBot) {
+        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_replied_to' });
+      }
+    }
+
+    // Fallback to single bot if using legacy config
+    if (botsToActivate.length === 0 && singleBotUserId) {
+      const botMentioned = mentions?.users?.some((u: any) => u.id === singleBotUserId);
+      const replyingToBot = reply?.authorId === singleBotUserId;
 
       if (botMentioned || replyingToBot || fallbackActivate) {
         const reason = botMentioned ? 'bot_mentioned' : replyingToBot ? 'bot_replied_to' : 'fallback_activate';
-        console.log(`[DiscordMessageReceptor] Creating agent activation (${reason})`);
-
-        const { createAgentActivation } = require('connectome-ts/src/helpers/factories');
-
-        this.addOperation({
-          type: 'addFacet',
-          facet: createAgentActivation(reason, {
-            id: `activation-${messageId}`,
-            priority: 'normal',
-            source: 'discord-message',
-            sourceAgentId: author.id,
-            channelId,
-            messageId,
-            author,
-            streamRef: { streamId, streamType, metadata: { channelId, channelName } }
-          })
-        });
+        botsToActivate.push({ agentName: '', reason });  // Empty agentName = legacy mode
       }
+    }
+
+    // Create targeted activations for each bot
+    for (const { agentName, reason } of botsToActivate) {
+      console.log(`[DiscordMessageReceptor] Creating agent activation for ${agentName || 'default'} (${reason})`);
+
+      const activationOptions: any = {
+        id: `activation-${messageId}${agentName ? `-${agentName}` : ''}`,
+        priority: 'normal',
+        source: 'discord-message',
+        sourceAgentId: author.id,
+        channelId,
+        messageId,
+        author,
+        streamRef: { streamId, streamType, metadata: { channelId, channelName } }
+      };
+
+      // Add targetAgent for multi-bot routing
+      if (agentName) {
+        activationOptions.targetAgent = agentName;
+      }
+
+      this.addOperation({
+        type: 'addFacet',
+        facet: createAgentActivation(reason, activationOptions)
+      });
     }
   }
 
@@ -473,7 +556,9 @@ class DiscordInfrastructureTransform extends Component {
   constraints = [priorityConstraint(150)];
 
   // Discord configuration (injected via component config)
+  // Can be single config (legacy) or array of bot configs (multi-bot)
   private discordConfig?: any;
+  private botConfigs?: Array<any>;  // Multi-bot support
 
   // Agent system prompts to emit as ambient facets (behavioral instructions without identity)
   // Identity is emitted separately when Discord connects
@@ -493,7 +578,9 @@ class DiscordInfrastructureTransform extends Component {
   execute(context: ExecutionContext): void {
     if (this.hasTriggered) return;
 
-    if (!this.discordConfig) {
+    // Support both single config (legacy) and multi-bot configs
+    const configs = this.botConfigs || (this.discordConfig ? [this.discordConfig] : []);
+    if (configs.length === 0) {
       console.log('[DiscordInfrastructure] Waiting for config...');
       return;
     }
@@ -514,39 +601,47 @@ class DiscordInfrastructureTransform extends Component {
       return;
     }
 
-    const hasDiscordAfferent = components.some((c: any) => c.constructor.name === 'DiscordAfferent');
-    if (hasDiscordAfferent) {
-      console.log('[DiscordInfrastructure] DiscordAfferent already exists, skipping creation');
+    // Check if any afferents already exist
+    const existingAfferents = components.filter((c: any) => c.constructor.name === 'DiscordAfferent');
+    if (existingAfferents.length >= configs.length) {
+      console.log(`[DiscordInfrastructure] All ${configs.length} DiscordAfferents already exist, skipping creation`);
       this.hasTriggered = true;
       return;
     }
 
-    console.log('[DiscordInfrastructure] All components ready - creating DiscordAfferent via component:add');
+    console.log(`[DiscordInfrastructure] All components ready - creating ${configs.length} DiscordAfferent(s) via component:add`);
     this.hasTriggered = true;
 
     // Emit system prompts as ambient facets for each agent
     this.emitSystemPromptFacets();
 
-    this.emit({
-      topic: 'component:add',
-      timestamp: Date.now(),
-      payload: {
-        componentType: 'DiscordAfferent',
-        componentId: 'discord:DiscordAfferent',
-        config: {
-          host: this.discordConfig.host,
-          path: this.discordConfig.path,
-          guild: this.discordConfig.guild,
-          agent: this.discordConfig.agent,
-          token: this.discordConfig.token,
-          autoJoinChannels: this.discordConfig.autoJoinChannels || [],
-          _axonMetadata: {
-            moduleUrl: this.discordConfig.moduleUrl,
-            manifestUrl: this.discordConfig.manifestUrl
+    // Create one DiscordAfferent per bot config
+    for (const config of configs) {
+      const botId = config.botId || config.agent || 'default';
+      console.log(`[DiscordInfrastructure] Creating DiscordAfferent for bot: ${botId}`);
+
+      this.emit({
+        topic: 'component:add',
+        timestamp: Date.now(),
+        payload: {
+          componentType: 'DiscordAfferent',
+          componentId: `discord:DiscordAfferent:${botId}`,
+          config: {
+            host: config.host,
+            path: config.path,
+            guild: config.guild,
+            agent: config.agent,
+            botId: config.botId,  // Multi-bot: which bot to connect as
+            token: config.token,
+            autoJoinChannels: config.autoJoinChannels || [],
+            _axonMetadata: {
+              moduleUrl: config.moduleUrl,
+              manifestUrl: config.manifestUrl
+            }
           }
         }
-      }
-    });
+      });
+    }
   }
 
   /**
@@ -589,30 +684,55 @@ class DiscordInfrastructureTransform extends Component {
 class DiscordEffector extends Component {
   constraints = [priorityConstraint(ComponentPriority.EFFECTOR)];
 
-  private discordAfferent?: any;
+  // Map of botId -> DiscordAfferent for multi-bot support
+  private discordAfferents: Map<string, any> = new Map();
   private channels: string[] = [];
 
   onMount(): void {
+    this.refreshAfferents();
+  }
+
+  private refreshAfferents(): void {
     const space = this.space;
-    if (space) {
-      this.discordAfferent = space.components.find((c: any) =>
-        c.constructor.name === 'DiscordAfferent'
-      );
-      console.log(`[DiscordEffector] Found DiscordAfferent:`, !!this.discordAfferent);
+    if (!space) return;
+
+    // Find all DiscordAfferent components
+    const afferents = space.components.filter((c: any) =>
+      c.constructor.name === 'DiscordAfferent'
+    );
+
+    for (const afferent of afferents) {
+      // Extract botId from component ID (format: discord:DiscordAfferent:botId)
+      const componentId = (afferent as any).id || '';
+      const botIdMatch = componentId.match(/discord:DiscordAfferent:(.+)/);
+      const botId = botIdMatch ? botIdMatch[1] : 'default';
+      this.discordAfferents.set(botId, afferent);
+      console.log(`[DiscordEffector] Registered afferent for bot: ${botId}`);
     }
+
+    console.log(`[DiscordEffector] Found ${this.discordAfferents.size} DiscordAfferent(s)`);
+  }
+
+  private getAfferentForBot(botId: string): any {
+    // Try exact match first
+    if (this.discordAfferents.has(botId)) {
+      return this.discordAfferents.get(botId);
+    }
+    // Fall back to first available
+    if (this.discordAfferents.size > 0) {
+      const fallback = this.discordAfferents.values().next().value;
+      console.warn(`[DiscordEffector] No afferent for bot ${botId}, using fallback`);
+      return fallback;
+    }
+    return undefined;
   }
 
   execute(context: ExecutionContext): void {
     const { state, frame } = context;
 
-    // Lazy lookup for DiscordAfferent
-    if (!this.discordAfferent) {
-      const space = this.space;
-      if (space) {
-        this.discordAfferent = space.components.find((c: any) =>
-          c.constructor.name === 'DiscordAfferent'
-        );
-      }
+    // Lazy refresh afferents if none found
+    if (this.discordAfferents.size === 0) {
+      this.refreshAfferents();
     }
 
     // Process frame deltas for facets we care about
@@ -650,12 +770,17 @@ class DiscordEffector extends Component {
   private handleActivation(facet: Facet, state: ReadonlyVEILState): void {
     const activation = facet as any;
     const channelId = activation.state?.channelId || activation.state?.metadata?.channelId;
+    const targetAgent = activation.state?.targetAgent || activation.state?.metadata?.targetAgent;
 
-    if (!channelId || !this.discordAfferent?.sendTyping) return;
+    if (!channelId) return;
 
-    console.log(`[DiscordEffector] Sending typing indicator to channel: ${channelId}`);
+    // Get the correct afferent for this bot
+    const afferent = this.getAfferentForBot(targetAgent || 'default');
+    if (!afferent?.sendTyping) return;
 
-    this.discordAfferent.sendTyping({ channelId }).catch((err: any) =>
+    console.log(`[DiscordEffector] Sending typing indicator to channel: ${channelId} via ${targetAgent || 'default'}`);
+
+    afferent.sendTyping({ channelId }).catch((err: any) =>
       console.error(`Failed to send typing indicator:`, err)
     );
   }
@@ -669,6 +794,16 @@ class DiscordEffector extends Component {
     if (!streamId || !streamId.startsWith('discord:')) return;
 
     console.log(`[DiscordEffector] Processing speech for stream: ${streamId}`);
+    console.log(`[DiscordEffector] Raw speech content:\n---\n${content}\n---`);
+    console.log(`[DiscordEffector] agentName=${speech.agentName}, agentId=${speech.agentId}`);
+
+    // Strip speaker prefix (e.g., "claude-opus-4-5: " or "claude-opus-4: ")
+    // The prefix is added by SpeakerPrefixReceptor for internal identification
+    const prefixMatch = content.match(/^[^:]+:\s*/);
+    if (prefixMatch) {
+      content = content.substring(prefixMatch[0].length);
+      console.log(`[DiscordEffector] Stripped speaker prefix: "${prefixMatch[0].trim()}"`);
+    }
 
     // Check for reply syntax: <reply:@username> message
     const replyMatch = content.match(/^<reply:@([^>]+)>\s*/);
@@ -705,21 +840,25 @@ class DiscordEffector extends Component {
       console.log(`[DiscordEffector] Sending as reply to message ${replyToMessageId}`);
     }
 
-    console.log(`[DiscordEffector] Sending to channel ${channelId}: "${content}"`);
+    // Get the correct afferent for this bot
+    const botId = speech.agentName || speech.agentId || 'default';
+    const afferent = this.getAfferentForBot(botId);
 
-    if (!this.discordAfferent) {
-      console.error('[DiscordEffector] DiscordAfferent not available');
+    console.log(`[DiscordEffector] Sending to channel ${channelId} via bot ${botId}: "${content}"`);
+
+    if (!afferent) {
+      console.error(`[DiscordEffector] No DiscordAfferent available for bot ${botId}`);
       return;
     }
 
-    if (this.discordAfferent.send && typeof this.discordAfferent.send === 'function') {
-      this.discordAfferent.send(sendParams)
-        .then(() => console.log(`[DiscordEffector] Successfully sent message`))
-        .catch((err: any) => console.error(`Failed to send to Discord:`, err));
-    } else if (this.discordAfferent.actions?.has('send')) {
-      this.discordAfferent.actions.get('send')(sendParams)
-        .then(() => console.log(`[DiscordEffector] Successfully sent message`))
-        .catch((err: any) => console.error(`Failed to send to Discord:`, err));
+    if (afferent.send && typeof afferent.send === 'function') {
+      afferent.send(sendParams)
+        .then(() => console.log(`[DiscordEffector] Successfully sent message via ${botId}`))
+        .catch((err: any) => console.error(`Failed to send to Discord via ${botId}:`, err));
+    } else if (afferent.actions?.has('send')) {
+      afferent.actions.get('send')(sendParams)
+        .then(() => console.log(`[DiscordEffector] Successfully sent message via ${botId}`))
+        .catch((err: any) => console.error(`Failed to send to Discord via ${botId}:`, err));
     }
   }
 
@@ -847,20 +986,50 @@ export class DiscordApplication implements ConnectomeApplication {
     // space.addComponent(new ComponentManager(), 'ComponentManager');
     console.log('🔧 ComponentManager should be provided by Host');
 
-    const botToken = (this.config as any).botToken || '';
-        const modulePort = this.config.discord.modulePort || 8080;
+    const modulePort = this.config.discord.modulePort || 8080;
+    const moduleUrl = `http://localhost:${modulePort}/modules/discord-afferent/module`;
+    const manifestUrl = `http://localhost:${modulePort}/modules/discord-afferent/manifest`;
 
-    // Build Discord configuration
-    const discordConfig = {
-      host: this.config.discord.host,
-      path: '/ws',
-      guild: this.config.discord.guild,
-      agent: this.config.agentName,
-      token: botToken,
-      autoJoinChannels: this.config.discord.autoJoinChannels || [],
-      moduleUrl: `http://localhost:${modulePort}/modules/discord-afferent/module`,
-      manifestUrl: `http://localhost:${modulePort}/modules/discord-afferent/manifest`
-    };
+    // Build bot configs - support both single bot (legacy) and multi-bot
+    let botConfigs: Array<any>;
+    let agentSystemPrompts: Array<{ agentName: string; systemPrompt: string }>;
+
+    if (this.config.bots && this.config.bots.length > 0) {
+      // Multi-bot mode: use bots array
+      console.log(`🤖 Multi-bot mode: configuring ${this.config.bots.length} bot(s)`);
+      botConfigs = this.config.bots.map(bot => ({
+        host: this.config.discord.host,
+        path: '/ws',
+        guild: bot.guild || this.config.discord.guild,
+        agent: bot.agentName,
+        botId: bot.botId,
+        token: bot.token,
+        autoJoinChannels: bot.autoJoinChannels || this.config.discord.autoJoinChannels || [],
+        moduleUrl,
+        manifestUrl
+      }));
+      agentSystemPrompts = this.config.bots.map(bot => ({
+        agentName: bot.agentName,
+        systemPrompt: bot.systemPrompt
+      }));
+    } else {
+      // Legacy single-bot mode
+      const botToken = (this.config as any).botToken || '';
+      botConfigs = [{
+        host: this.config.discord.host,
+        path: '/ws',
+        guild: this.config.discord.guild,
+        agent: this.config.agentName,
+        botId: this.config.discord.botId || (this.config as any).botId,
+        token: botToken,
+        autoJoinChannels: this.config.discord.autoJoinChannels || [],
+        moduleUrl,
+        manifestUrl
+      }];
+      agentSystemPrompts = [
+        { agentName: this.config.agentName, systemPrompt: this.config.systemPrompt }
+      ];
+    }
 
     // STEP 1: Add DiscordInfrastructureTransform (via component:add event to test ComponentManager)
     console.log('🔧 Adding DiscordInfrastructureTransform...');
@@ -872,11 +1041,9 @@ export class DiscordApplication implements ConnectomeApplication {
         componentType: 'DiscordInfrastructureTransform',
         componentId: 'discord:DiscordInfrastructureTransform',
         config: {
-          discordConfig,
-          // Pass agent system prompts directly so they can be emitted as ambient facets
-          agentSystemPrompts: [
-            { agentName: this.config.agentName, systemPrompt: this.config.systemPrompt }
-          ]
+          botConfigs,  // Multi-bot configs
+          discordConfig: botConfigs[0],  // Keep for backwards compat
+          agentSystemPrompts
         }
       }
     });
@@ -940,32 +1107,36 @@ export class DiscordApplication implements ConnectomeApplication {
 
     console.log('✅ Infrastructure components added - Discord component will be created when ready');
 
-    // Check for existing AgentComponent
-    let existingAgentComponent = space.getComponentById('discord-agent:AgentComponent');
+    // Check for existing AgentComponent (unless skipAgentComponent is set)
+    if (!(this.config as any).skipAgentComponent) {
+      let existingAgentComponent = space.getComponentById('discord-agent:AgentComponent');
 
-    if (!existingAgentComponent) {
-      console.log('🆕 Creating agent component');
-      
-        const agentConfig = {
-          name: this.config.agentName,
-          systemPrompt: this.config.systemPrompt,
-          autoActionRegistration: true
-        };
-      
-      space.emit({
-        topic: 'component:add',
-        source: space.getRef(),
-        timestamp: Date.now(),
-        payload: {
-          componentType: 'AgentComponent',
-          componentId: 'discord-agent:AgentComponent',
-          config: { agentConfig } 
-        }
-      });
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
+      if (!existingAgentComponent) {
+        console.log('🆕 Creating agent component');
+
+          const agentConfig = {
+            name: this.config.agentName,
+            systemPrompt: this.config.systemPrompt,
+            autoActionRegistration: true
+          };
+
+        space.emit({
+          topic: 'component:add',
+          source: space.getRef(),
+          timestamp: Date.now(),
+          payload: {
+            componentType: 'AgentComponent',
+            componentId: 'discord-agent:AgentComponent',
+            config: { agentConfig }
+          }
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } else {
+        console.log('✅ Found existing agent component');
+      }
     } else {
-      console.log('✅ Found existing agent component');
+      console.log('⏭️  Skipping AgentComponent creation (using ToolLoopAgent instead)');
     }
     
     // Subscribe to agent response events

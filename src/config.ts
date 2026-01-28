@@ -13,7 +13,25 @@ export interface DiscordConfig {
 }
 
 export function loadConfig(): DiscordConfig {
-  // Check environment variables first
+  // Check for multi-bot DISCORD_BOT_TOKENS first (comma-separated)
+  // Use first token as the "primary" token for backwards compatibility
+  const tokensEnv = process.env.DISCORD_BOT_TOKENS;
+  if (tokensEnv) {
+    const tokens = tokensEnv.split(',').map(t => t.trim()).filter(t => t);
+    if (tokens.length > 0) {
+      return {
+        botToken: tokens[0],  // First token is the primary for legacy compatibility
+        guildId: process.env.DISCORD_GUILD_ID,
+        channelId: process.env.DISCORD_CHANNEL_ID,
+        httpPort: parseInt(process.env.HTTP_PORT || '8080'),
+        wsPort: parseInt(process.env.WS_PORT || '8081'),
+        modulePort: parseInt(process.env.MODULE_PORT || '8082'),
+        debug: process.env.DEBUG === 'true'
+      };
+    }
+  }
+
+  // Check legacy DISCORD_BOT_TOKEN
   if (process.env.DISCORD_BOT_TOKEN) {
     return {
       botToken: process.env.DISCORD_BOT_TOKEN,
