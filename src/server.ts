@@ -27,6 +27,7 @@ import WebSocket from 'ws';
 import { AxonModuleServer } from '@connectome/axon-server';
 import { join } from 'path';
 import { loadConfig, DiscordConfig } from './config';
+import { messageDeduplicator } from './message-deduplicator.js';
 
 interface AxonConnection {
   ws: WebSocket;
@@ -779,6 +780,12 @@ class CombinedDiscordAxonServer {
       // Skip messages from THIS bot to prevent loops
       if (message.author.id === bot.userId) return;
 
+      // Deduplicate across multiple bots - only first bot to receive should forward
+      // This prevents N bots from creating N facets for the same message
+      if (!messageDeduplicator.shouldEmit(message.id, bot.id)) {
+        return; // Another bot already forwarded this message
+      }
+
       // Cache the message author for reverse lookups (so bot can mention them back)
       this.userNameToId.set(message.author.username.toLowerCase(), message.author.id);
 
@@ -844,7 +851,10 @@ class CombinedDiscordAxonServer {
 
     // Handle message edits
     bot.client.on('messageUpdate', async (oldMessage, newMessage) => {
-      // Forward to connections using THIS bot that have joined this channel
+      // Deduplicate across multiple bots
+      if (!messageDeduplicator.shouldEmit(`edit:${newMessage.id}`, bot.id)) {
+        return;
+      }
 
       // Parse mentions for both old and new content
       const oldParsed = oldMessage.content ? this.parseMentions(oldMessage) : { content: '', mentions: null };
@@ -879,6 +889,11 @@ class CombinedDiscordAxonServer {
 
     // Handle message deletes
     bot.client.on('messageDelete', async (message) => {
+      // Deduplicate across multiple bots
+      if (!messageDeduplicator.shouldEmit(`delete:${message.id}`, bot.id)) {
+        return;
+      }
+
       // Forward to connections using THIS bot that have joined this channel
       for (const [id, connection] of this.connections) {
         if (connection.botId === bot.id &&

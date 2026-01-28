@@ -21,6 +21,7 @@ import {
   createAgentActivation
 } from 'connectome-ts';
 import type { SpaceEvent, ExecutionContext, Facet, ReadonlyVEILState } from 'connectome-ts';
+import { FocusedContextTransform } from './focused-context-transform.js';
 
 export interface DiscordBotConfig {
   agentName: string;
@@ -123,23 +124,11 @@ class DiscordMessageReceptor extends Component {
       }
     }
 
-    // Emit identity system prompt with actual bot name from Discord (per bot)
-    const botName = payload.botDisplayName || payload.botUsername || payload.agentName;
-    const agentName = payload.botId || payload.agentName;
-    if (botName && agentName) {
-      console.log(`[DiscordMessageReceptor] Emitting identity facet for bot: ${botName} (agent: ${agentName})`);
-      this.addOperation({
-        type: 'addFacet',
-        facet: {
-          id: `system-prompt:identity:${agentName}`,
-          type: 'ambient',
-          content: `You are connected to Discord as ${botName}.`,
-          agentId: agentName  // Associate with specific agent
-        }
-      });
-    }
+    // NOTE: Identity ambient facets removed - they caused context pollution
+    // in multi-bot setups (all bots saw all identities). Identity should be
+    // handled via system prompts in the agent config or ContextTransform.
 
-    // Also create the connection event facet
+    // Create the connection event facet
     this.addOperation({
       type: 'addFacet',
       facet: {
@@ -566,11 +555,12 @@ class DiscordInfrastructureTransform extends Component {
 
   // Track which components we're waiting for (simplified for merged receptor)
   // Note: AgentComponent is created later in setupDiscordAgent, not in infrastructure
+  // Using FocusedContextTransform instead of ContextTransform for multi-bot support
   private requiredComponents = new Set([
     'DiscordMessageReceptor',
     'DiscordEffector',
     'ActionEffector',
-    'ContextTransform'
+    'FocusedContextTransform'
   ]);
 
   private hasTriggered = false;
@@ -1091,14 +1081,17 @@ export class DiscordApplication implements ConnectomeApplication {
       }
     });
 
+    // Use FocusedContextTransform for per-agent context filtering and identity injection
     space.emit({
       topic: 'component:add',
       source: space.getRef(),
       timestamp: Date.now(),
       payload: {
-        componentType: 'ContextTransform',
-        componentId: 'discord:ContextTransform',
-        config: {}
+        componentType: 'FocusedContextTransform',
+        componentId: 'discord:FocusedContextTransform',
+        config: {
+          maxConversationFrames: 100  // Can be overridden via config.json
+        }
       }
     });
 
@@ -1185,6 +1178,10 @@ export class DiscordApplication implements ConnectomeApplication {
 
     // Merged FLEX effector (handles auto-join, typing, speech)
     registry.register('DiscordEffector', DiscordEffector);
+
+    // Register FocusedContextTransform to replace generic ContextTransform
+    // This provides per-agent context filtering and identity injection
+    registry.register('FocusedContextTransform', FocusedContextTransform);
 
     // Core components (AgentComponent, ActionEffector, ContextTransform, AxonLoaderComponent
     // are registered in connectome-ts core-components.ts)
