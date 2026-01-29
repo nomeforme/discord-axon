@@ -172,9 +172,11 @@ export class FocusedContextTransform extends Component {
         // Note: createAgentActivation puts extra options under metadata
         const botName = activationState.metadata?.targetAgent || activationState.targetAgent;
 
-        // Build system prompt with bot identity for Discord
+        // Build system prompt with bot identity and Discord capabilities
         const systemPrompt = botName
-          ? `You are <${botName}> in Discord.`
+          ? `You are <${botName}> in Discord.
+
+To mention users or other bots, use <@username> syntax. The system will convert usernames to Discord IDs automatically.`
           : activationState.systemPrompt || this.defaultOptions?.systemPrompt;
 
         // Build agent options

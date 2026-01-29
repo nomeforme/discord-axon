@@ -156,6 +156,18 @@ class CombinedDiscordAxonServer {
       this.bots.set(config.name, botClient);
       this.setupBotEventHandlers(botClient);
 
+      // Add bot name -> Discord ID mapping for mention resolution
+      // This allows bots to mention each other using config names (e.g., <@claude-opus-4-5>)
+      if (client.user?.id) {
+        // Map config name (agentName) to Discord ID
+        this.userNameToId.set(config.name.toLowerCase(), client.user.id);
+        // Also map Discord username (which may have special chars) to Discord ID
+        if (client.user.username) {
+          this.userNameToId.set(client.user.username.toLowerCase(), client.user.id);
+        }
+        console.log(`[Server] Mapped bot mentions: ${config.name} -> ${client.user.id}`);
+      }
+
       console.log(`[Server] Bot ${config.name} logged in as ${client.user?.tag} (ID: ${client.user?.id})`);
     }
 
@@ -581,7 +593,7 @@ class CombinedDiscordAxonServer {
     const replacements: Array<{ from: string; to: string }> = [];
 
     // Find all channel mentions: <#channelname>
-    const channelMentionPattern = /<#([a-zA-Z0-9_-]+)>/g;
+    const channelMentionPattern = /<#([^\s<>@#&!]+)>/gu;
     const channelMatches = [...content.matchAll(channelMentionPattern)];
 
     for (const match of channelMatches) {
@@ -613,7 +625,8 @@ class CombinedDiscordAxonServer {
     }
 
     // Find all @ mentions (users or roles): <@name>
-    const atMentionPattern = /<@([a-zA-Z0-9_-]+)>/g;
+    // Use Unicode-aware pattern to match non-ASCII usernames (Cyrillic, etc.)
+    const atMentionPattern = /<@([^\s<>@#&!]+)>/gu;
     const atMatches = [...content.matchAll(atMentionPattern)];
 
     for (const match of atMatches) {
@@ -624,7 +637,10 @@ class CombinedDiscordAxonServer {
       let userId = this.userNameToId.get(nameLower);
 
       if (userId) {
+        // Convert to proper Discord mention format (including self-mentions)
+        // Self-mention response prevention is handled by messageCreate check (line 819)
         replacements.push({ from: `<@${name}>`, to: `<@${userId}>` });
+        console.log(`[Server:unparseMentions] Resolved <@${name}> -> <@${userId}>`);
         continue;
       }
 

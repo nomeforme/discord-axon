@@ -249,8 +249,7 @@ class DiscordMessageReceptor extends Component {
     }
 
     // Create speech facet as nested child
-    // Note: Don't set 'speaker' in state - the HUD will prefix messages with "speaker: "
-    // which causes duplicate prefixes. Discord already shows usernames.
+    // Set 'speaker' so the HUD includes author attribution when rendering context for the bot
     const speechFacet: any = {
       id: `speech-${messageId}`,
       type: 'speech',
@@ -258,6 +257,7 @@ class DiscordMessageReceptor extends Component {
       streamId,
       streamType,
       state: {
+        speaker: author,
         speakerId: `discord:${authorId}`,
         metadata: { attachments }
       }
@@ -942,7 +942,8 @@ class DiscordEffector extends Component {
 
     // Strip speaker prefix (e.g., "claude-opus-4-5: " or "claude-opus-4: ")
     // The prefix is added by SpeakerPrefixReceptor for internal identification
-    const prefixMatch = content.match(/^[^:]+:\s*/);
+    // Only match bot-name-like patterns: alphanumeric with hyphens, no spaces
+    const prefixMatch = content.match(/^([a-zA-Z0-9][-a-zA-Z0-9]*):\s*/);
     if (prefixMatch) {
       content = content.substring(prefixMatch[0].length);
       console.log(`[DiscordEffector] Stripped speaker prefix: "${prefixMatch[0].trim()}"`);

@@ -68,7 +68,8 @@ export class SpeakerPrefixReceptor extends Component {
     }
 
     // Strip XML-like tags (<my_turn>, </my_turn>, <tool-use>, etc.)
-    content = content.replace(/<[^>]+>/g, '').trim();
+    // BUT preserve Discord mentions (<@username>, <@!userid>, <#channel>, <@&role>)
+    content = content.replace(/<(?!@|#)[^>]+>/g, '').trim();
     if (originalContent !== content) {
       console.log(`[SpeakerPrefixReceptor] Cleaned content for ${agentName}`);
     }
