@@ -21,7 +21,7 @@ import {
 import { DiscordApplication } from './discord-app.js';
 import { AnthropicToolProvider } from './anthropic-tool-provider.js';
 import { BedrockProvider } from './bedrock-provider.js';
-import { ToolLoopAgent } from './tool-loop-agent.js';
+import { ToolLoopAgent, createFetchTool, ToolHandler } from './tool-loop-agent.js';
 import { DiscordAgentEffector } from './discord-agent-effector.js';
 import { SpeakerPrefixReceptor } from './speaker-prefix-receptor.js';
 
@@ -248,6 +248,10 @@ async function main() {
     process.exit(1);
   }
 
+  // Create shared tool instances
+  const fetchTool = createFetchTool();
+  console.log('🔧 Created fetch tool');
+
   // Create ConnectomeHost (no providers needed - agents use their own)
   const host = new ConnectomeHost({
     persistence: {
@@ -334,6 +338,13 @@ async function main() {
 
       const systemPrompt = bot.prompt || botConfig.default_system_instruction || 'Standard';
 
+      // Build tools list from config
+      const agentTools: ToolHandler[] = [];
+      if (bot.tools?.includes('fetch')) {
+        agentTools.push(fetchTool);
+        console.log(`   🔧 ${bot.name}: fetch tool enabled`);
+      }
+
       // Create the ToolLoopAgent with provider passed directly
       const agent = new ToolLoopAgent(
         {
@@ -342,7 +353,7 @@ async function main() {
           defaultMaxTokens: bot.max_tokens || botConfig.max_tokens || 4096,
           defaultTemperature: 1.0,
           maxToolRounds: 5,
-          tools: [] // Add tools here if needed
+          tools: agentTools
         },
         provider,
         veilStateManager

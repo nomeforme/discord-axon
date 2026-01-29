@@ -174,13 +174,7 @@ export class FocusedContextTransform extends Component {
 
         // Build system prompt with bot identity for Discord
         const systemPrompt = botName
-          ? `You are in a Discord server. Your username in this conversation is ${botName}. Messages from other participants are prefixed with "username: ". Your own previous messages are also prefixed with "${botName}: ". Before sending a message, check this against your own username to determine if a given message was sent by you or not. You can mention other participants with @username.
-
-Discord supports markdown formatting:
-- **bold** for bold
-- *italic* for italic
-- \`code\` for inline code
-- \`\`\`language for code blocks`
+          ? `You are <${botName}> in Discord.`
           : activationState.systemPrompt || this.defaultOptions?.systemPrompt;
 
         // Build agent options

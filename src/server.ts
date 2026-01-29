@@ -1054,17 +1054,29 @@ class CombinedDiscordAxonServer {
           // Convert human-readable mentions to Discord IDs
           const discordMessage = await this.unparseMentions(message, channel.guildId, bot);
 
-          const sentMessage = await channel.send(discordMessage);
-          console.log(`[Server] [${bot.id}] Sent message to ${channel.name}: ${message} -> ${discordMessage} (ID: ${sentMessage.id})`);
+          // Split message into chunks if too long for Discord (2000 char limit)
+          const chunks = this.splitMessage(discordMessage);
+          let lastSentMessage: any = null;
 
-          // Send confirmation back to client with message ID
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            lastSentMessage = await channel.send(chunk);
+            if (chunks.length > 1) {
+              console.log(`[Server] [${bot.id}] Sent chunk ${i + 1}/${chunks.length} to ${channel.name} (ID: ${lastSentMessage.id})`);
+            } else {
+              console.log(`[Server] [${bot.id}] Sent message to ${channel.name}: ${message.substring(0, 50)}... (ID: ${lastSentMessage.id})`);
+            }
+          }
+
+          // Send confirmation back to client with last message ID
           connection.ws.send(JSON.stringify({
             type: 'message_sent',
             botId: bot.id,
             channelId: channelId,
-            messageId: sentMessage.id,
+            messageId: lastSentMessage?.id,
             content: message,
-            timestamp: sentMessage.createdAt.toISOString()
+            chunks: chunks.length,
+            timestamp: lastSentMessage?.createdAt?.toISOString()
           }));
         } catch (error: any) {
           console.error(`[Server] [${connection.botId}] Failed to send message:`, error);
@@ -1669,6 +1681,51 @@ class CombinedDiscordAxonServer {
    */
   async startSingleBot(botToken: string) {
     await this.start([{ name: 'default', token: botToken }]);
+  }
+
+  /**
+   * Split a message into chunks that fit within Discord's 2000 character limit
+   */
+  private splitMessage(content: string, maxLength: number = 1900): string[] {
+    if (content.length <= maxLength) {
+      return [content];
+    }
+
+    const chunks: string[] = [];
+    let remaining = content;
+
+    while (remaining.length > 0) {
+      if (remaining.length <= maxLength) {
+        chunks.push(remaining);
+        break;
+      }
+
+      // Find a good break point (newline, period, space)
+      let breakPoint = maxLength;
+
+      // Try to break at newline
+      const lastNewline = remaining.lastIndexOf('\n', maxLength);
+      if (lastNewline > maxLength * 0.5) {
+        breakPoint = lastNewline + 1;
+      } else {
+        // Try to break at sentence end
+        const lastPeriod = remaining.lastIndexOf('. ', maxLength);
+        if (lastPeriod > maxLength * 0.5) {
+          breakPoint = lastPeriod + 2;
+        } else {
+          // Break at space
+          const lastSpace = remaining.lastIndexOf(' ', maxLength);
+          if (lastSpace > maxLength * 0.5) {
+            breakPoint = lastSpace + 1;
+          }
+        }
+      }
+
+      chunks.push(remaining.substring(0, breakPoint).trim());
+      remaining = remaining.substring(breakPoint).trim();
+    }
+
+    return chunks;
   }
 }
 

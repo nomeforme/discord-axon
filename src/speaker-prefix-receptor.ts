@@ -73,17 +73,15 @@ export class SpeakerPrefixReceptor extends Component {
       console.log(`[SpeakerPrefixReceptor] Cleaned content for ${agentName}`);
     }
 
-    // Check if content already has this agent's prefix
-    if (content.startsWith(`${agentName}: `)) {
-      // Still need to update facet.content with stripped version (without tags)
-      if (originalContent !== content) {
-        facet.content = content;
-      }
-      return;
+    // Update facet content with cleaned version (XML tags stripped, @discord-control extracted)
+    if (originalContent !== content) {
+      facet.content = content;
     }
 
-    // Modify the facet content in place (before it gets added to VEIL)
-    console.log(`[SpeakerPrefixReceptor] Adding prefix "${agentName}:" to facet ${facet.id}`);
-    facet.content = `${agentName}: ${content}`;
+    // DISABLED: Speaker prefix causes issues with duplicate display
+    // The prefix was meant for multi-bot history identification but Discord
+    // already shows usernames, so it's not needed
+    // console.log(`[SpeakerPrefixReceptor] Adding prefix "${agentName}:" to facet ${facet.id}`);
+    // facet.content = `${agentName}: ${content}`;
   }
 }

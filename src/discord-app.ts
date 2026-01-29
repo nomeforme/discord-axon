@@ -189,6 +189,8 @@ class DiscordMessageReceptor extends Component {
     }
 
     // Create speech facet as nested child
+    // Note: Don't set 'speaker' in state - the HUD will prefix messages with "speaker: "
+    // which causes duplicate prefixes. Discord already shows usernames.
     const speechFacet: any = {
       id: `speech-${messageId}`,
       type: 'speech',
@@ -197,7 +199,6 @@ class DiscordMessageReceptor extends Component {
       streamType,
       state: {
         speakerId: `discord:${authorId}`,
-        speaker: author,
         metadata: { attachments }
       }
     };
@@ -356,7 +357,7 @@ class DiscordMessageReceptor extends Component {
           this.addOperation({
             type: 'rewriteFacet',
             id: speechFacet.id,
-            changes: { content: `${discordMsg.author}: ${discordMsg.content}` }
+            changes: { content: discordMsg.content }
           });
         }
 
@@ -425,7 +426,7 @@ class DiscordMessageReceptor extends Component {
           id: `speech-${msg.messageId}`,
           type: 'speech',
           content: msg.content,
-          state: { speakerId: `discord:${msg.authorId}`, speaker: msg.author }
+          state: { speakerId: `discord:${msg.authorId}` }
         };
 
         children.push({
@@ -476,7 +477,7 @@ class DiscordMessageReceptor extends Component {
         this.addOperation({
           type: 'rewriteFacet',
           id: speechFacetId,
-          changes: { content: `${author}: ${content}` }
+          changes: { content }
         });
       }
 

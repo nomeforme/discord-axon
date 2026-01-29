@@ -118,10 +118,15 @@ export class ToolLoopAgent {
     console.log(`[ToolLoopAgent] Starting cycle with ${toolSchemas.length} tools`);
     console.log(`[ToolLoopAgent] Context keys: ${Object.keys(context).join(', ')}`);
     console.log(`[ToolLoopAgent] Messages count: ${context.messages.length}`);
-    if (context.messages.length > 0) {
-      const lastMsg = context.messages[context.messages.length - 1];
-      console.log(`[ToolLoopAgent] Last message role=${lastMsg.role}, content=${String(lastMsg.content).substring(0, 200)}...`);
+
+    // Log full message history before sending to LLM
+    console.log(`[ToolLoopAgent] === FULL MESSAGE HISTORY ===`);
+    for (let i = 0; i < context.messages.length; i++) {
+      const msg = context.messages[i];
+      const contentPreview = String(msg.content).substring(0, 300).replace(/\n/g, '\\n');
+      console.log(`[ToolLoopAgent] [${i}] ${msg.role}: ${contentPreview}${msg.content.length > 300 ? '...' : ''}`);
     }
+    console.log(`[ToolLoopAgent] === END MESSAGE HISTORY ===`);
 
     // When using tools, we can't have an assistant prefill message at the end
     // The HUD may add one for <my_turn> formatting - strip ALL trailing assistant messages
