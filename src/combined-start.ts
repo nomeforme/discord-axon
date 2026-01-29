@@ -24,6 +24,8 @@ import { BedrockProvider } from './bedrock-provider.js';
 import { ToolLoopAgent, createFetchTool, ToolHandler } from './tool-loop-agent.js';
 import { DiscordAgentEffector } from './discord-agent-effector.js';
 import { SpeakerPrefixReceptor } from './speaker-prefix-receptor.js';
+import { DiscordCommandEffector } from './discord-command-effector.js';
+import { FocusedContextTransform } from './focused-context-transform.js';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -365,6 +367,56 @@ async function main() {
 
       console.log(`   ✅ Created ToolLoopAgent + DiscordAgentEffector for ${bot.name}`);
     }
+
+    // Create DiscordCommandEffector for !-prefixed commands
+    // Get references to the receptor and context transform for config updates
+    const messageReceptor = space.components.find((c: any) =>
+      c.constructor.name === 'DiscordMessageReceptor'
+    ) as any;
+    const contextTransform = space.components.find((c: any) =>
+      c.constructor.name === 'FocusedContextTransform'
+    ) as FocusedContextTransform | undefined;
+
+    // Create a sendMessage function that uses the first available afferent
+    const sendMessage = async (channelId: string, content: string) => {
+      const afferent = space.components.find((c: any) =>
+        c.constructor.name === 'DiscordAfferent'
+      ) as any;
+
+      if (afferent?.send) {
+        await afferent.send({ channelId, message: content });
+      } else {
+        console.warn('[DiscordCommandEffector] No DiscordAfferent available to send message');
+      }
+    };
+
+    // Config update callback - updates receptor and context transform
+    const onConfigUpdate = (updates: {
+      randomReplyChance?: number;
+      maxBotMentionsPerConversation?: number;
+      maxConversationFrames?: number;
+      maxMemoryFrames?: number;
+    }) => {
+      // Update the receptor config
+      if (messageReceptor?.updateConfig) {
+        messageReceptor.updateConfig(updates);
+      }
+
+      // Update context transform max frames if specified
+      if (updates.maxConversationFrames !== undefined && contextTransform) {
+        contextTransform.maxConversationFrames = updates.maxConversationFrames;
+        console.log(`[Config] Updated maxConversationFrames to ${updates.maxConversationFrames}`);
+      }
+
+      console.log('[Config] Runtime config updated via command:', updates);
+    };
+
+    const commandEffector = new DiscordCommandEffector(
+      { sendMessage },
+      onConfigUpdate
+    );
+    space.addComponent(commandEffector, 'discord-command-effector');
+    console.log('✅ Added DiscordCommandEffector for !-prefixed commands');
 
     console.log('\n🎉 Discord bot is fully running!');
     console.log(`🔧 Debug interface: http://localhost:${debugPort}`);

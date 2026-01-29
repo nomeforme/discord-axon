@@ -22,6 +22,7 @@ import {
 } from 'connectome-ts';
 import type { SpaceEvent, ExecutionContext, Facet, ReadonlyVEILState } from 'connectome-ts';
 import { FocusedContextTransform } from './focused-context-transform.js';
+import { DiscordCommandEffector } from './discord-command-effector.js';
 
 export interface DiscordBotConfig {
   agentName: string;
@@ -50,12 +51,23 @@ export interface DiscordAppConfig {
   };
 }
 
+// Recognized commands
+const COMMANDS = ['!rr', '!bb', '!mcf', '!mmf', '!help'];
+
+// Config values that can be updated at runtime
+export interface DiscordRuntimeConfig {
+  randomReplyChance: number;  // 0 = disabled, 1 = 100%, 10 = 10%, etc.
+  maxBotMentionsPerConversation: number;  // Max bot-to-bot mentions before requiring human
+  maxConversationFrames: number;
+  maxMemoryFrames: number;
+}
+
 /**
  * FLEX Component: Discord Message Receptor
  *
  * Handles all Discord event-to-facet transformations:
  * - discord:connected → config facets + connection event
- * - discord:message → message facets + agent activations
+ * - discord:message → message facets + agent activations + command facets
  * - discord:history-sync → offline edit/delete detection
  * - discord:messageUpdate → message edit handling
  * - discord:messageDelete → message deletion handling
@@ -64,6 +76,54 @@ export interface DiscordAppConfig {
  */
 class DiscordMessageReceptor extends Component {
   constraints = [priorityConstraint(ComponentPriority.RECEPTOR)];
+
+  // Runtime config (can be updated via commands)
+  private runtimeConfig: DiscordRuntimeConfig = {
+    randomReplyChance: 0,
+    maxBotMentionsPerConversation: 1,  // Limit bot-to-bot to 1 exchange by default
+    maxConversationFrames: 100,
+    maxMemoryFrames: 200
+  };
+
+  /**
+   * Update runtime configuration
+   */
+  updateConfig(updates: Partial<DiscordRuntimeConfig>): void {
+    this.runtimeConfig = { ...this.runtimeConfig, ...updates };
+    console.log('[DiscordMessageReceptor] Config updated:', this.runtimeConfig);
+  }
+
+  /**
+   * Get current runtime configuration
+   */
+  getConfig(): DiscordRuntimeConfig {
+    return { ...this.runtimeConfig };
+  }
+
+  /**
+   * Parse command from message content
+   * Returns null if not a command
+   * Handles messages like "<@username> !bb" by stripping leading mentions
+   */
+  private parseCommand(message: string): { command: string; args: string } | null {
+    if (!message) return null;
+
+    // Strip leading mentions (format: <@username> or <@!userid>)
+    // The server already parses mentions to <@username> format
+    let cleaned = message.trim();
+    cleaned = cleaned.replace(/^(<@[^>]+>\s*)+/g, '').trim();
+
+    if (!cleaned.startsWith('!')) return null;
+
+    const parts = cleaned.split(/\s+/);
+    const command = parts[0].toLowerCase();
+    const args = parts.slice(1).join(' ').trim();
+
+    // Only return if it's a recognized command
+    if (!COMMANDS.includes(command)) return null;
+
+    return { command, args };
+  }
 
   execute(context: ExecutionContext): void {
     const { event, state } = context;
@@ -233,17 +293,23 @@ class DiscordMessageReceptor extends Component {
       this.addOperation(delta);
     }
 
-    // Multi-bot activation: Check which bot(s) are mentioned or replied to
-    const activatePattern = /<activate\s+([^>]+)>/i;
-    const activateMatch = rawContent?.match(activatePattern);
-    const fallbackActivate = activateMatch !== null && activateMatch !== undefined;
+    // Check for commands first - commands bypass normal activation
+    const parsedCommand = this.parseCommand(content);
+    if (parsedCommand) {
+      console.log(`[DiscordMessageReceptor] Parsed command: ${parsedCommand.command} args="${parsedCommand.args}"`);
+    }
 
     // Debug: Log the bot map and mentions
     console.log(`[DiscordMessageReceptor] Bot user map:`, JSON.stringify(botUserMap));
     console.log(`[DiscordMessageReceptor] Mentions:`, JSON.stringify(mentions));
 
+    // Multi-bot activation: Check which bot(s) are mentioned or replied to
+    const activatePattern = /<activate\s+([^>]+)>/i;
+    const activateMatch = rawContent?.match(activatePattern);
+    const fallbackActivate = activateMatch !== null && activateMatch !== undefined;
+
     // Collect all bots that should be activated
-    const botsToActivate: Array<{ agentName: string; reason: string }> = [];
+    const botsToActivate: Array<{ agentName: string; reason: string; botUserId: string }> = [];
 
     // Check each bot in the map
     for (const [botUserId, botInfo] of Object.entries(botUserMap)) {
@@ -252,9 +318,9 @@ class DiscordMessageReceptor extends Component {
       console.log(`[DiscordMessageReceptor] Checking bot ${botInfo.agentName} (${botUserId}): mentioned=${botMentioned}, replyingTo=${replyingToBot}`);
 
       if (botMentioned) {
-        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_mentioned' });
+        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_mentioned', botUserId });
       } else if (replyingToBot) {
-        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_replied_to' });
+        botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_replied_to', botUserId });
       }
     }
 
@@ -265,7 +331,93 @@ class DiscordMessageReceptor extends Component {
 
       if (botMentioned || replyingToBot || fallbackActivate) {
         const reason = botMentioned ? 'bot_mentioned' : replyingToBot ? 'bot_replied_to' : 'fallback_activate';
-        botsToActivate.push({ agentName: '', reason });  // Empty agentName = legacy mode
+        botsToActivate.push({ agentName: '', reason, botUserId: singleBotUserId });  // Empty agentName = legacy mode
+      }
+    }
+
+    // If this is a command and a bot was mentioned, create command facet instead of activation
+    if (parsedCommand && botsToActivate.length > 0) {
+      const firstBot = botsToActivate[0];
+      console.log(`[DiscordMessageReceptor] Creating command facet for ${parsedCommand.command} (target: ${firstBot.agentName || 'default'})`);
+
+      // Get current frame count from VEILStateManager if available
+      const space = this.space as any;
+      const veilStateManager = space?.getVEILStateManager?.();
+      const currentFrameCount = veilStateManager?.getState()?.frameHistory?.length ?? 0;
+
+      this.addOperation({
+        type: 'addFacet',
+        facet: {
+          id: `discord-command-${messageId}`,
+          type: 'discord-command',
+          streamId,
+          aspects: { ephemeral: true },
+          state: {
+            command: parsedCommand.command,
+            args: parsedCommand.args,
+            targetAgent: firstBot.agentName,
+            channelId,
+            messageId,
+            author,
+            authorId,
+            currentConfig: {
+              ...this.runtimeConfig,
+              currentFrameCount
+            }
+          }
+        }
+      });
+      return;  // Commands bypass normal activation
+    }
+
+    // Bot-to-bot loop prevention
+    const isFromBot = isBot === true;
+    if (isFromBot && botsToActivate.length > 0) {
+      // Check the bot-interaction counter for this stream
+      const counterFacetId = `bot-interaction-counter-${streamId}`;
+      const counterFacet = state.facets.get(counterFacetId);
+      const currentCount = (counterFacet?.state as any)?.count ?? 0;
+
+      const maxBotMentions = this.runtimeConfig.maxBotMentionsPerConversation;
+
+      if (maxBotMentions > 0 && currentCount >= maxBotMentions) {
+        console.log(`[DiscordMessageReceptor] Bot-to-bot limit reached (${currentCount}/${maxBotMentions}), skipping activation`);
+        return;  // Skip activation - limit reached
+      }
+
+      // Increment counter
+      console.log(`[DiscordMessageReceptor] Bot-to-bot interaction ${currentCount + 1}/${maxBotMentions}`);
+      this.addOperation({
+        type: 'addFacet',
+        facet: {
+          id: counterFacetId,
+          type: 'bot-interaction-counter',
+          streamId,
+          state: {
+            count: currentCount + 1,
+            lastBotAuthor: authorId,
+            lastTimestamp: Date.now()
+          }
+        }
+      });
+    } else if (!isFromBot) {
+      // Human message - reset the bot-interaction counter
+      const counterFacetId = `bot-interaction-counter-${streamId}`;
+      if (state.facets.has(counterFacetId)) {
+        console.log(`[DiscordMessageReceptor] Human message - resetting bot-to-bot counter`);
+        this.addOperation({
+          type: 'addFacet',
+          facet: {
+            id: counterFacetId,
+            type: 'bot-interaction-counter',
+            streamId,
+            state: {
+              count: 0,
+              resetBy: authorId,
+              resetTimestamp: Date.now()
+            }
+          }
+        });
       }
     }
 
@@ -1183,6 +1335,9 @@ export class DiscordApplication implements ConnectomeApplication {
     // Register FocusedContextTransform to replace generic ContextTransform
     // This provides per-agent context filtering and identity injection
     registry.register('FocusedContextTransform', FocusedContextTransform);
+
+    // Register DiscordCommandEffector for !-prefixed commands
+    registry.register('DiscordCommandEffector', DiscordCommandEffector);
 
     // Core components (AgentComponent, ActionEffector, ContextTransform, AxonLoaderComponent
     // are registered in connectome-ts core-components.ts)
