@@ -314,10 +314,16 @@ class DiscordMessageReceptor extends Component {
     // Check each bot in the map
     for (const [botUserId, botInfo] of Object.entries(botUserMap)) {
       const botMentioned = mentions?.users?.some((u: any) => u.id === botUserId);
+      // Also check if a role with matching name was mentioned (for bots with associated roles)
+      const roleMentioned = mentions?.roles?.some((r: any) => {
+        const roleName = r.name?.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        const botName = botInfo.displayName?.toLowerCase().replace(/[^a-z0-9-]/g, '');
+        return roleName === botName;
+      });
       const replyingToBot = reply?.authorId === botUserId;
-      console.log(`[DiscordMessageReceptor] Checking bot ${botInfo.agentName} (${botUserId}): mentioned=${botMentioned}, replyingTo=${replyingToBot}`);
+      console.log(`[DiscordMessageReceptor] Checking bot ${botInfo.agentName} (${botUserId}): mentioned=${botMentioned}, roleMentioned=${roleMentioned}, replyingTo=${replyingToBot}`);
 
-      if (botMentioned) {
+      if (botMentioned || roleMentioned) {
         botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_mentioned', botUserId });
       } else if (replyingToBot) {
         botsToActivate.push({ agentName: botInfo.agentName, reason: 'bot_replied_to', botUserId });
