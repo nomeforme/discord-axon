@@ -72,6 +72,7 @@ class CombinedDiscordAxonServer {
   private app = express();
   private wss: WebSocket.Server;
   private bots = new Map<string, DiscordBotClient>();  // Map of botId -> DiscordBotClient
+  private allBotUserIds = new Set<string>();  // Set of all bot Discord user IDs for deduplication
   private connections = new Map<string, AxonConnection>();
   private moduleServer: AxonModuleServer;
   private hotReloadWss?: WebSocket.Server;
@@ -159,6 +160,8 @@ class CombinedDiscordAxonServer {
       // Add bot name -> Discord ID mapping for mention resolution
       // This allows bots to mention each other using config names (e.g., <@claude-opus-4-5>)
       if (client.user?.id) {
+        // Track all bot user IDs for message deduplication
+        this.allBotUserIds.add(client.user.id);
         // Map config name (agentName) to Discord ID
         this.userNameToId.set(config.name.toLowerCase(), client.user.id);
         // Also map Discord username (which may have special chars) to Discord ID
@@ -793,8 +796,8 @@ class CombinedDiscordAxonServer {
     });
 
     bot.client.on('messageCreate', async (message) => {
-      // Skip messages from THIS bot to prevent loops
-      if (message.author.id === bot.userId) return;
+      // Skip messages from ANY of our bots to prevent loops and duplicate facets
+      if (this.allBotUserIds.has(message.author.id)) return;
 
       // Deduplicate across multiple bots - only first bot to receive should forward
       // This prevents N bots from creating N facets for the same message
@@ -867,6 +870,9 @@ class CombinedDiscordAxonServer {
 
     // Handle message edits
     bot.client.on('messageUpdate', async (oldMessage, newMessage) => {
+      // Skip edits from ANY of our bots
+      if (newMessage.author?.id && this.allBotUserIds.has(newMessage.author.id)) return;
+
       // Deduplicate across multiple bots
       if (!messageDeduplicator.shouldEmit(`edit:${newMessage.id}`, bot.id)) {
         return;
@@ -905,6 +911,9 @@ class CombinedDiscordAxonServer {
 
     // Handle message deletes
     bot.client.on('messageDelete', async (message) => {
+      // Skip deletes from ANY of our bots
+      if (message.author?.id && this.allBotUserIds.has(message.author.id)) return;
+
       // Deduplicate across multiple bots
       if (!messageDeduplicator.shouldEmit(`delete:${message.id}`, bot.id)) {
         return;
