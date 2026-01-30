@@ -153,6 +153,11 @@ export class ToolLoopAgent {
       tools: hasTools ? toolSchemas : undefined
     };
 
+    // DEBUG: Log full context being sent to LLM
+    console.log(`\n[ToolLoopAgent] ========== FULL LLM REQUEST ==========`);
+    console.log(JSON.stringify(messages, null, 2));
+    console.log(`[ToolLoopAgent] ========== END LLM REQUEST ==========\n`);
+
     // Initial LLM call
     let response = await this.provider.generate(messages, options);
     let totalTokens = response.tokensUsed || 0;
