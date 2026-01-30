@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "npm run build && node dist/cli.js",
+    "start:grpc": "tsx src/grpc-main.ts",
+    "start:grpc:dev": "nodemon --watch src --exec tsx src/grpc-main.ts",
     "dev": "ts-node src/cli.ts",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -27,6 +29,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@connectome/axon-interfaces": "file:../connectome-axon-interfaces",
     "@connectome/axon-server": "file:../axon-server",
+    "@connectome/grpc": "file:../connectome-grpc",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.9",
     "connectome-ts": "file:../connectome-ts",
