@@ -27,12 +27,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/combined-start.ts",
-    "src/discord-app.ts",
-    "src/discord-agent-effector.ts",
-    "src/focused-context-transform.ts",
-    "src/speaker-prefix-receptor.ts",
-    "src/discord-command-effector.ts",
-    "src/discord-with-host.ts"
+    "src/unused",
+    "src/grpc/old"
   ]
 }
