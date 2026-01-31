@@ -151,5 +151,6 @@
   "max_tokens": 4096,
   "max_conversation_frames": 100,
   "max_memory_frames": 200,
-  "max_bot_mentions_per_conversation": 1
+  "max_bot_mentions_per_conversation": 1,
+  "random_reply_chance": 200
 }

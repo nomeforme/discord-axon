@@ -98,6 +98,9 @@ export class FocusedContextTransform {
       // Transform server context to LLM messages
       const messages = this.transformToMessages(serverContext);
 
+      // Log conversation data before sending to LLM
+      this.logConversationData(messages, streamId);
+
       return {
         messages,
         metadata: {
@@ -203,5 +206,31 @@ To mention users or other bots, use <@username> syntax. The system will convert 
         frameCount: 1
       }
     };
+  }
+
+  /**
+   * Log conversation data before sending to LLM
+   */
+  private logConversationData(messages: ContextMessage[], streamId: string): void {
+    console.log(`\n╔══════════════════════════════════════════════════════════════════════════════`);
+    console.log(`║ [FocusedContextTransform:${this.botName}] CONVERSATION DATA FOR LLM`);
+    console.log(`║ Stream: ${streamId}`);
+    console.log(`║ Total messages: ${messages.length}`);
+    console.log(`╠══════════════════════════════════════════════════════════════════════════════`);
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const roleLabel = msg.role.toUpperCase().padEnd(9);
+      const contentPreview = msg.content.length > 200
+        ? msg.content.substring(0, 200) + '...'
+        : msg.content;
+
+      // Replace newlines with visible marker for compact display
+      const displayContent = contentPreview.replace(/\n/g, ' ↵ ');
+
+      console.log(`║ [${i + 1}] ${roleLabel}: ${displayContent}`);
+    }
+
+    console.log(`╚══════════════════════════════════════════════════════════════════════════════\n`);
   }
 }

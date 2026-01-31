@@ -70,6 +70,13 @@ export class DiscordMessageReceptor {
     // Skip messages from THIS bot only
     if (message.author.id === this.bot.userId) return;
 
+    // Skip messages that start with '.' prefix (user opted out of storage/response)
+    const contentWithoutMentions = message.content.trim().replace(/^(<@[!&]?\d+>\s*)+/g, '').trim();
+    if (contentWithoutMentions.startsWith('.')) {
+      console.log(`[DiscordMessageReceptor:${botName}] Message starts with '.', skipping storage and response`);
+      return;
+    }
+
     // Build stream ID for tracking
     const streamId = message.guild?.id
       ? `discord:${message.guild.id}:${message.channel.id}`
@@ -89,8 +96,7 @@ export class DiscordMessageReceptor {
       .map(u => this.state.botUserIdToName.get(u.id))
       .find(name => name !== undefined);
 
-    // Handle ! commands
-    const contentWithoutMentions = message.content.trim().replace(/^(<@[!&]?\d+>\s*)+/g, '').trim();
+    // Handle ! commands (commands bypass normal message flow)
     if (contentWithoutMentions.startsWith('!')) {
       // If a bot was mentioned, only that bot handles the command
       if (mentionedBotName) {
@@ -133,52 +139,10 @@ export class DiscordMessageReceptor {
       }
     }
 
-    // Routing logic: determine if this bot should handle the message
-    if (mentionedBotName) {
-      if (mentionedBotName !== botName) {
-        return; // Not the mentioned bot, skip
-      }
-      console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... mentions me, processing`);
-    } else if (replyToBotName) {
-      if (replyToBotName !== botName) {
-        return; // Not the replied-to bot, skip
-      }
-      console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... is reply to me, processing`);
-    } else {
-      // No bot mentioned or replied to - check for random reply
-      const randomChance = this.state.runtimeConfig.randomReplyChance;
-
-      if (randomChance > 0) {
-        const shouldRandomReply = Math.floor(Math.random() * randomChance) === 0;
-
-        if (shouldRandomReply) {
-          if (!messageDeduplicator.shouldEmit(message.id, botName)) {
-            return;
-          }
-          console.log(`[DiscordMessageReceptor:${botName}] Random reply triggered (1/${randomChance}) for message ${message.id.substring(0, 8)}...`);
-          replyToBotName = botName;
-        } else {
-          return; // Random chance didn't trigger, skip
-        }
-      } else {
-        return; // Random reply disabled and no mention - skip
-      }
-    }
-
-    // Bot-to-bot limiting
-    if (isFromBot) {
-      const currentCount = this.state.botInteractionCounts.get(streamId) || 0;
-      const maxBotMentions = this.state.runtimeConfig.maxBotMentionsPerConversation;
-
-      if (maxBotMentions > 0 && currentCount >= maxBotMentions) {
-        console.log(`[DiscordMessageReceptor:${botName}] Bot-to-bot limit reached (${currentCount}/${maxBotMentions}) for stream ${streamId}, skipping activation`);
-        return;
-      }
-
-      this.state.botInteractionCounts.set(streamId, currentCount + 1);
-      console.log(`[DiscordMessageReceptor:${botName}] Bot-to-bot interaction ${currentCount + 1}/${maxBotMentions} for stream ${streamId}`);
-    }
-
+    // ========================================================================
+    // EMIT TO CONNECTOME FIRST - ALL messages get stored as facets
+    // This happens BEFORE activation checks so conversation context is preserved
+    // ========================================================================
     try {
       const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
 
@@ -226,8 +190,9 @@ export class DiscordMessageReceptor {
 
       // Emit message to Connectome (for state tracking)
       // Skip emitting for known bots - they record their own speech via agent:speech
+      // Use deduplication to ensure only one bot instance emits each message
       const isFromKnownBot = this.state.botUserIdToName.has(message.author.id);
-      if (!isFromKnownBot) {
+      if (!isFromKnownBot && messageDeduplicator.shouldEmit(message.id, botName)) {
         await this.bot.grpcClient.emitDiscordMessage({
           content: message.content,
           authorId: message.author.id,
@@ -253,11 +218,74 @@ export class DiscordMessageReceptor {
           replyTo,
           targetBotName: mentionedBotName || replyToBotName
         });
+        console.log(`[DiscordMessageReceptor:${botName}] Emitted message to Connectome from ${message.author.username}: ${message.content.substring(0, 50)}...`);
+      }
+    } catch (error: any) {
+      console.error(`[DiscordMessageReceptor:${botName}] Error emitting message to Connectome:`, error.message);
+    }
+
+    // ========================================================================
+    // ACTIVATION CHECK - Determine if this bot should respond
+    // This is separate from emission - message is already stored in Connectome
+    // ========================================================================
+    let shouldActivate = false;
+    let activationReason = '';
+
+    if (mentionedBotName) {
+      if (mentionedBotName === botName) {
+        shouldActivate = true;
+        activationReason = 'mentioned';
+        console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... mentions me, will activate`);
+      }
+      // If another bot was mentioned, don't activate (but message was still emitted above)
+    } else if (replyToBotName) {
+      if (replyToBotName === botName) {
+        shouldActivate = true;
+        activationReason = 'reply';
+        console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... is reply to me, will activate`);
+      }
+      // If reply to another bot, don't activate (but message was still emitted above)
+    } else {
+      // No bot mentioned or replied to - check for random reply
+      const randomChance = this.state.runtimeConfig.randomReplyChance;
+
+      if (randomChance > 0) {
+        const shouldRandomReply = Math.floor(Math.random() * randomChance) === 0;
+
+        if (shouldRandomReply) {
+          if (messageDeduplicator.shouldEmit(`random-${message.id}`, botName)) {
+            shouldActivate = true;
+            activationReason = 'random';
+            console.log(`[DiscordMessageReceptor:${botName}] Random reply triggered (1/${randomChance}) for message ${message.id.substring(0, 8)}...`);
+          }
+        }
+      }
+      // If random chance didn't trigger, don't activate (but message was still emitted above)
+    }
+
+    // If not activating, we're done (message was already emitted to Connectome)
+    if (!shouldActivate) {
+      return;
+    }
+
+    // Bot-to-bot limiting (only applies to activation, not emission)
+    if (isFromBot) {
+      const currentCount = this.state.botInteractionCounts.get(streamId) || 0;
+      const maxBotMentions = this.state.runtimeConfig.maxBotMentionsPerConversation;
+
+      if (maxBotMentions > 0 && currentCount >= maxBotMentions) {
+        console.log(`[DiscordMessageReceptor:${botName}] Bot-to-bot limit reached (${currentCount}/${maxBotMentions}) for stream ${streamId}, skipping activation`);
+        return;
       }
 
-      console.log(`[DiscordMessageReceptor:${botName}] Message from ${message.author.username}: ${message.content.substring(0, 50)}...`);
+      this.state.botInteractionCounts.set(streamId, currentCount + 1);
+      console.log(`[DiscordMessageReceptor:${botName}] Bot-to-bot interaction ${currentCount + 1}/${maxBotMentions} for stream ${streamId}`);
+    }
 
-      // Trigger agent activation via DiscordAgentEffector
+    // ========================================================================
+    // TRIGGER AGENT - Only if we passed all activation checks
+    // ========================================================================
+    try {
       if (this.bot.agent) {
         await this.agentEffector.runAgentCycle({
           streamId,
@@ -269,7 +297,7 @@ export class DiscordMessageReceptor {
         console.log(`[DiscordMessageReceptor:${botName}] No agent configured, skipping response`);
       }
     } catch (error: any) {
-      console.error(`[DiscordMessageReceptor:${botName}] Error handling message:`, error.message);
+      console.error(`[DiscordMessageReceptor:${botName}] Error triggering agent:`, error.message);
     }
   }
 }

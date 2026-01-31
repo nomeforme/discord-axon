@@ -75,17 +75,26 @@ async function main(): Promise<void> {
     processingActivations: new Set<string>(),
     botInteractionCounts: new Map<string, number>(),
     runtimeConfig: {
-      randomReplyChance: 0,
-      maxBotMentionsPerConversation: 3,
+      randomReplyChance: (config as any).random_reply_chance ?? 200,
+      maxBotMentionsPerConversation: (config as any).max_bot_mentions_per_conversation ?? 3,
       maxConversationFrames: config.max_conversation_frames || 100,
       maxMemoryFrames: 500
     },
     pairedBots
   };
 
+  // Track context transforms for runtime config updates
+  const contextTransforms: FocusedContextTransform[] = [];
+
   const updateRuntimeConfig = (updates: Partial<RuntimeConfig>) => {
     Object.assign(state.runtimeConfig, updates);
     console.log('[RuntimeConfig] Updated:', updates);
+    // Propagate mcf changes to all context transforms
+    if (updates.maxConversationFrames !== undefined) {
+      for (const ct of contextTransforms) {
+        ct.setMaxConversationFrames(updates.maxConversationFrames);
+      }
+    }
   };
 
   // Initialize each bot
@@ -117,6 +126,7 @@ async function main(): Promise<void> {
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
       maxTokens: botConfig.max_tokens || 50000
     });
+    contextTransforms.push(contextTransform);
 
     // 2. DiscordCommandEffector - handles ! commands
     const commandEffector = new DiscordCommandEffector(botConfig.name);
