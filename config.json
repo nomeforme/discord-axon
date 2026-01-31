@@ -20,7 +20,6 @@
       "model": "claude-sonnet-4-5-20250929",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -30,7 +29,6 @@
       "model": "claude-opus-4-5-20251101",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -40,7 +38,6 @@
       "model": "bedrock-claude-3-opus-20240229",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -50,7 +47,6 @@
       "model": "claude-opus-4-20250514",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -60,7 +56,6 @@
       "model": "claude-haiku-4-5-20251001",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -70,7 +65,6 @@
       "model": "bedrock-claude-3-sonnet-20240229",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -80,7 +74,6 @@
       "model": "bedrock-claude-3-5-sonnet-20240620",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -90,7 +83,6 @@
       "model": "bedrock-claude-3-5-sonnet-20241022",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -100,7 +92,6 @@
       "model": "claude-sonnet-4-20250514",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -110,7 +101,6 @@
       "model": "claude-opus-4-1-20250805",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -120,7 +110,6 @@
       "model": "claude-3-5-haiku-20241022",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -130,7 +119,6 @@
       "model": "claude-3-haiku-20240307",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -140,17 +128,12 @@
       "model": "claude-3-7-sonnet-20250219",
       "prompt": "Standard",
       "max_tokens": 4096,
-      "persist_history": true,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
     }
   ],
-  "default_model": "claude-sonnet-4-20250514",
-  "default_system_instruction": "Standard",
-  "max_tokens": 4096,
   "max_conversation_frames": 100,
-  "max_memory_frames": 200,
   "max_bot_mentions_per_conversation": 1,
   "random_reply_chance": 200
 }

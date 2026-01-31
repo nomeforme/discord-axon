@@ -18,7 +18,6 @@ export interface BotConfig {
   model?: string;
   prompt?: string;
   max_tokens?: number;
-  persist_history?: boolean;
   tools?: string[];
   guild_id?: string | null;
   auto_join_channels?: string[];
@@ -30,8 +29,9 @@ export interface BotConfig {
 export interface DiscordConfig {
   active_bots: string[];
   bots: BotConfig[];
-  default_model?: string;
   max_conversation_frames?: number;
+  max_bot_mentions_per_conversation?: number;
+  random_reply_chance?: number;
 }
 
 /**
