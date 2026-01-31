@@ -18,7 +18,7 @@ WORKDIR /workspace
 
 # Copy all necessary packages (build context is parent directory)
 COPY connectome-axon-interfaces ./connectome-axon-interfaces
-COPY connectome-grpc ./connectome-grpc
+COPY connectome-grpc-common ./connectome-grpc-common
 COPY axon-server ./axon-server
 COPY connectome-ts ./connectome-ts
 COPY discord-axon ./discord-axon
@@ -27,8 +27,8 @@ COPY discord-axon ./discord-axon
 WORKDIR /workspace/connectome-axon-interfaces
 RUN npm install && npm run build
 
-# Build connectome-grpc
-WORKDIR /workspace/connectome-grpc
+# Build connectome-grpc-common
+WORKDIR /workspace/connectome-grpc-common
 RUN npm install && npm run build
 
 # Build axon-server
