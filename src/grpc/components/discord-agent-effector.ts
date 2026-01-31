@@ -105,6 +105,8 @@ export class DiscordAgentEffector {
 
     try {
       // Fetch and render context via FocusedContextTransform
+      // Note: emitDiscordMessage uses waitForFrame:true, so attachments should be in server context
+      // Following signal-axon pattern: single source of truth from server context, no manual injection
       let renderedContext;
       try {
         renderedContext = await this.contextTransform.renderContext(streamId);

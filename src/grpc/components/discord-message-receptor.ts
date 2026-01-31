@@ -145,6 +145,15 @@ export class DiscordMessageReceptor {
     }
 
     // ========================================================================
+    // PROCESS ATTACHMENTS - Do this once, use for both emit and agent
+    // ========================================================================
+    const processedAttachments = await this.processAttachments(message.attachments);
+    if (processedAttachments.length > 0) {
+      const imageCount = processedAttachments.filter(a => a.data).length;
+      console.log(`[DiscordMessageReceptor:${botName}] Processed ${processedAttachments.length} attachment(s), ${imageCount} with image data`);
+    }
+
+    // ========================================================================
     // EMIT TO CONNECTOME FIRST - ALL messages get stored as facets
     // This happens BEFORE activation checks so conversation context is preserved
     // ========================================================================
@@ -209,7 +218,7 @@ export class DiscordMessageReceptor {
           guildName: message.guild?.name ?? undefined,
           messageId: message.id,
           timestamp: message.createdTimestamp,
-          attachments: await this.processAttachments(message.attachments),
+          attachments: processedAttachments,
           mentions: message.mentions.users.map(u => ({
             id: u.id,
             username: u.username
@@ -283,6 +292,7 @@ export class DiscordMessageReceptor {
 
     // ========================================================================
     // TRIGGER AGENT - Only if we passed all activation checks
+    // Attachments flow through server context (single source of truth pattern)
     // ========================================================================
     try {
       if (this.bot.agent) {
