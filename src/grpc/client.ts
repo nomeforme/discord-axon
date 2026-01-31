@@ -3,7 +3,7 @@
  * Connects discord-axon to the central Connectome gRPC server
  */
 
-import { ConnectomeClient, type ConnectomeClientConfig, type SubscriptionOptions, type FacetDelta } from '@connectome/grpc';
+import { ConnectomeClient, type ConnectomeClientConfig, type SubscriptionOptions, type FacetDelta } from '@connectome/grpc-common';
 import { EventEmitter } from 'events';
 
 /**
