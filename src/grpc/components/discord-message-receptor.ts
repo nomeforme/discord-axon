@@ -11,7 +11,12 @@
  * since it runs in the client, not the server's Space.
  */
 
-import type { Message } from 'discord.js';
+import type { Message, Attachment } from 'discord.js';
+import sharp from 'sharp';
+
+// Image compression settings (match signal-axon)
+const IMAGE_MAX_DIMENSION = 1024;
+const IMAGE_JPEG_QUALITY = 80;
 import { messageDeduplicator } from '../../message-deduplicator.js';
 import { getUserNameCache } from '../utils/mention-resolver.js';
 import type { BotInstance, SharedState, RuntimeConfig } from '../types.js';
@@ -204,13 +209,7 @@ export class DiscordMessageReceptor {
           guildName: message.guild?.name ?? undefined,
           messageId: message.id,
           timestamp: message.createdTimestamp,
-          attachments: message.attachments.map(a => ({
-            id: a.id,
-            url: a.url,
-            name: a.name ?? undefined,
-            contentType: a.contentType ?? undefined,
-            size: a.size
-          })),
+          attachments: await this.processAttachments(message.attachments),
           mentions: message.mentions.users.map(u => ({
             id: u.id,
             username: u.username
@@ -298,6 +297,139 @@ export class DiscordMessageReceptor {
       }
     } catch (error: any) {
       console.error(`[DiscordMessageReceptor:${botName}] Error triggering agent:`, error.message);
+    }
+  }
+
+  /**
+   * Process attachments: download images and convert to base64
+   */
+  private async processAttachments(attachments: Map<string, Attachment>): Promise<Array<{
+    id: string;
+    url: string;
+    name?: string;
+    contentType?: string;
+    size: number;
+    data?: string;
+  }>> {
+    const botName = this.bot.config.name;
+    const processed: Array<{
+      id: string;
+      url: string;
+      name?: string;
+      contentType?: string;
+      size: number;
+      data?: string;
+    }> = [];
+
+    for (const [, att] of attachments) {
+      const contentType = att.contentType || '';
+      const isImage = contentType.startsWith('image/');
+
+      if (isImage && att.url) {
+        // Download image, compress, and convert to base64
+        const base64Data = await this.downloadAttachment(att.url, botName);
+        processed.push({
+          id: att.id,
+          url: att.url,
+          name: att.name ?? undefined,
+          contentType: base64Data ? 'image/jpeg' : contentType,  // JPEG after compression
+          size: att.size,
+          data: base64Data ?? undefined
+        });
+      } else {
+        // Non-image attachment, include metadata only
+        processed.push({
+          id: att.id,
+          url: att.url,
+          name: att.name ?? undefined,
+          contentType: contentType || undefined,
+          size: att.size
+        });
+      }
+    }
+
+    return processed;
+  }
+
+  /**
+   * Download an attachment from Discord CDN and return as compressed base64
+   */
+  private async downloadAttachment(url: string, botName: string): Promise<string | null> {
+    try {
+      console.log(`[DiscordMessageReceptor:${botName}] Downloading attachment from ${url}`);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`[DiscordMessageReceptor:${botName}] Failed to download attachment: ${response.status}`);
+        return null;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const originalSize = buffer.length;
+
+      // Compress image: resize to max dimension and convert to JPEG
+      const compressed = await this.compressImage(buffer, botName);
+      if (compressed) {
+        const base64 = compressed.toString('base64');
+        console.log(`[DiscordMessageReceptor:${botName}] Downloaded and compressed attachment: ${originalSize} -> ${compressed.length} bytes (${Math.round(compressed.length / originalSize * 100)}%)`);
+        return base64;
+      }
+
+      // Fallback to original if compression fails
+      const base64 = buffer.toString('base64');
+      console.log(`[DiscordMessageReceptor:${botName}] Downloaded attachment (uncompressed): ${base64.length} bytes (base64)`);
+      return base64;
+    } catch (error) {
+      console.error(`[DiscordMessageReceptor:${botName}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Compress an image: resize to max dimension and convert to JPEG
+   */
+  private async compressImage(buffer: Buffer, botName: string): Promise<Buffer | null> {
+    try {
+      // Get image metadata
+      const metadata = await sharp(buffer).metadata();
+      const { width, height, format } = metadata;
+
+      if (!width || !height) {
+        console.log(`[DiscordMessageReceptor:${botName}] Could not get image dimensions, skipping compression`);
+        return null;
+      }
+
+      // Check if resizing is needed
+      const maxDim = Math.max(width, height);
+      const needsResize = maxDim > IMAGE_MAX_DIMENSION;
+
+      // Skip compression for small images that are already JPEG
+      if (!needsResize && format === 'jpeg') {
+        console.log(`[DiscordMessageReceptor:${botName}] Image already optimized (${width}x${height} ${format})`);
+        return buffer;
+      }
+
+      // Build sharp pipeline
+      let pipeline = sharp(buffer);
+
+      // Resize if needed (maintain aspect ratio)
+      if (needsResize) {
+        pipeline = pipeline.resize(IMAGE_MAX_DIMENSION, IMAGE_MAX_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true
+        });
+      }
+
+      // Convert to JPEG
+      const compressed = await pipeline
+        .jpeg({ quality: IMAGE_JPEG_QUALITY })
+        .toBuffer();
+
+      console.log(`[DiscordMessageReceptor:${botName}] Compressed image: ${width}x${height} ${format} -> JPEG (${needsResize ? 'resized' : 'same size'})`);
+      return compressed;
+    } catch (error) {
+      console.error(`[DiscordMessageReceptor:${botName}] Image compression failed:`, error);
+      return null;
     }
   }
 }

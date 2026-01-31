@@ -42,7 +42,10 @@ function createLlmProvider(
   modelName: string,
   maxTokens: number
 ): AnthropicToolProvider | BedrockProvider | undefined {
-  const isBedrockModel = modelName.startsWith('us.') || modelName.startsWith('eu.');
+  // Check for bedrock- prefix (config format) or us./eu. prefixes (AWS region format)
+  const isBedrockModel = modelName.startsWith('bedrock-') ||
+                         modelName.startsWith('us.') ||
+                         modelName.startsWith('eu.');
 
   if (isBedrockModel) {
     return new BedrockProvider({

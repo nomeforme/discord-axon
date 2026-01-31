@@ -119,9 +119,13 @@ export class ToolLoopAgent {
     console.log(`[ToolLoopAgent] Context keys: ${Object.keys(context).join(', ')}`);
     console.log(`[ToolLoopAgent] Messages count: ${context.messages.length}`);
 
-    // Log full message history before sending to LLM
-    console.log(`[ToolLoopAgent] === FULL MESSAGE HISTORY ===`);
-    for (let i = 0; i < context.messages.length; i++) {
+    // Log message history before sending to LLM (last 10 messages only)
+    console.log(`[ToolLoopAgent] === MESSAGE HISTORY (${context.messages.length} total, showing last 10) ===`);
+    const historyStartIndex = Math.max(0, context.messages.length - 10);
+    if (historyStartIndex > 0) {
+      console.log(`[ToolLoopAgent] ... (${historyStartIndex} earlier messages omitted)`);
+    }
+    for (let i = historyStartIndex; i < context.messages.length; i++) {
       const msg = context.messages[i];
       const contentPreview = String(msg.content).substring(0, 300).replace(/\n/g, '\\n');
       console.log(`[ToolLoopAgent] [${i}] ${msg.role}: ${contentPreview}${msg.content.length > 300 ? '...' : ''}`);
@@ -153,9 +157,24 @@ export class ToolLoopAgent {
       tools: hasTools ? toolSchemas : undefined
     };
 
-    // DEBUG: Log full context being sent to LLM
+    // DEBUG: Log full context being sent to LLM (redact base64 image data)
     console.log(`\n[ToolLoopAgent] ========== FULL LLM REQUEST ==========`);
-    console.log(JSON.stringify(messages, null, 2));
+    const redactedMessages = messages.map(msg => {
+      if (msg.metadata?.attachments) {
+        return {
+          ...msg,
+          metadata: {
+            ...msg.metadata,
+            attachments: msg.metadata.attachments.map((att: any) => ({
+              ...att,
+              data: att.data ? `[BASE64 IMAGE: ${Math.round(att.data.length / 1024)}KB]` : undefined
+            }))
+          }
+        };
+      }
+      return msg;
+    });
+    console.log(JSON.stringify(redactedMessages, null, 2));
     console.log(`[ToolLoopAgent] ========== END LLM REQUEST ==========\n`);
 
     // Initial LLM call

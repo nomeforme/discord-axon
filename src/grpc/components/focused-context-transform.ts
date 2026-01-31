@@ -19,6 +19,16 @@ import type { DiscordGrpcClient } from '../client.js';
 export interface ContextMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  metadata?: {
+    attachments?: Array<{
+      id?: string;
+      url?: string;
+      contentType?: string;
+      name?: string;
+      size?: number;
+      data?: string;  // base64 encoded
+    }>;
+  };
 }
 
 /**
@@ -141,10 +151,19 @@ export class FocusedContextTransform {
         if (role === 'system') continue;
 
         if (role === 'user' || role === 'assistant') {
-          messages.push({
+          const message: ContextMessage = {
             role,
             content: msg.content || ''
-          });
+          };
+
+          // Preserve attachment metadata for LLM image processing
+          if (msg.metadata?.attachments && Array.isArray(msg.metadata.attachments) && msg.metadata.attachments.length > 0) {
+            message.metadata = {
+              attachments: msg.metadata.attachments
+            };
+          }
+
+          messages.push(message);
         }
       }
     }
@@ -209,16 +228,22 @@ To mention users or other bots, use <@username> syntax. The system will convert 
   }
 
   /**
-   * Log conversation data before sending to LLM
+   * Log conversation data before sending to LLM (last 10 messages only)
    */
   private logConversationData(messages: ContextMessage[], streamId: string): void {
     console.log(`\n╔══════════════════════════════════════════════════════════════════════════════`);
     console.log(`║ [FocusedContextTransform:${this.botName}] CONVERSATION DATA FOR LLM`);
     console.log(`║ Stream: ${streamId}`);
-    console.log(`║ Total messages: ${messages.length}`);
+    console.log(`║ Total messages: ${messages.length} (showing last 10)`);
     console.log(`╠══════════════════════════════════════════════════════════════════════════════`);
 
-    for (let i = 0; i < messages.length; i++) {
+    // Show only the last 10 messages
+    const startIndex = Math.max(0, messages.length - 10);
+    if (startIndex > 0) {
+      console.log(`║ ... (${startIndex} earlier messages omitted)`);
+    }
+
+    for (let i = startIndex; i < messages.length; i++) {
       const msg = messages[i];
       const roleLabel = msg.role.toUpperCase().padEnd(9);
       const contentPreview = msg.content.length > 200
@@ -229,6 +254,14 @@ To mention users or other bots, use <@username> syntax. The system will convert 
       const displayContent = contentPreview.replace(/\n/g, ' ↵ ');
 
       console.log(`║ [${i + 1}] ${roleLabel}: ${displayContent}`);
+
+      // Log attachment info if present (without raw base64 data)
+      if (msg.metadata?.attachments && msg.metadata.attachments.length > 0) {
+        for (const att of msg.metadata.attachments as any[]) {
+          const dataSize = att.data ? `${Math.round(att.data.length / 1024)}KB base64` : (att.url ? 'URL' : 'no data');
+          console.log(`║     └─ 📎 ${att.name || att.filename || att.id || 'attachment'} (${att.contentType}, ${dataSize})`);
+        }
+      }
     }
 
     console.log(`╚══════════════════════════════════════════════════════════════════════════════\n`);
