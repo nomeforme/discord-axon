@@ -145,68 +145,120 @@ export class DiscordMessageReceptor {
     }
 
     // ========================================================================
-    // PROCESS ATTACHMENTS - Do this once, use for both emit and agent
+    // EMIT TO CONNECTOME - Only ONE bot emits each message
+    // Check dedup BEFORE processing attachments to avoid 13x download/compress
+    //
+    // SPECIAL CASE: If message has attachments AND targets specific bot(s) (mention/reply),
+    // the first targeted bot (alphabetically) gets emission priority instead of dedup lottery.
+    // This ensures the targeted bot has attachments in context when it activates.
     // ========================================================================
-    const processedAttachments = await this.processAttachments(message.attachments);
-    if (processedAttachments.length > 0) {
-      const imageCount = processedAttachments.filter(a => a.data).length;
-      console.log(`[DiscordMessageReceptor:${botName}] Processed ${processedAttachments.length} attachment(s), ${imageCount} with image data`);
+    const isFromKnownBot = this.state.botUserIdToName.has(message.author.id);
+
+    // Check if message has image attachments
+    const hasImageAttachments = [...message.attachments.values()].some(
+      att => att.contentType?.startsWith('image/')
+    );
+
+    // Find all targeted bots (mentioned + replied to)
+    const targetedBotNames: string[] = [];
+    for (const [, user] of message.mentions.users) {
+      const name = this.state.botUserIdToName.get(user.id);
+      if (name && !targetedBotNames.includes(name)) {
+        targetedBotNames.push(name);
+      }
+    }
+    if (replyToBotName && !targetedBotNames.includes(replyToBotName)) {
+      targetedBotNames.push(replyToBotName);
     }
 
-    // ========================================================================
-    // EMIT TO CONNECTOME FIRST - ALL messages get stored as facets
-    // This happens BEFORE activation checks so conversation context is preserved
-    // ========================================================================
-    try {
-      const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
+    // Determine priority emitter for attachment+targeted case
+    let priorityEmitter: string | null = null;
+    if (hasImageAttachments && targetedBotNames.length > 0) {
+      // Sort alphabetically and pick first
+      targetedBotNames.sort();
+      priorityEmitter = targetedBotNames[0];
+      console.log(`[DiscordMessageReceptor:${botName}] Message has image + targets: [${targetedBotNames.join(', ')}], priority emitter: ${priorityEmitter}`);
+    }
 
-      // Ensure stream exists on server
-      await this.bot.streamManager.getOrCreateStream(
-        message.channel.id,
-        {
-          channelName,
-          channelType: message.channel.isDMBased() ? 'dm' : 'text',
-          guildId: message.guild?.id ?? undefined,
-          guildName: message.guild?.name ?? undefined
-        }
-      );
+    // Track if this bot should skip activation due to not being priority emitter
+    let skipActivationForPriority = false;
 
-      // Fetch reply info if this is a reply
-      let replyTo: { messageId?: string; channelId?: string; authorId?: string; author?: string } | undefined;
-      if (message.reference?.messageId) {
-        try {
-          const referencedMsg = await message.channel.messages.fetch(message.reference.messageId);
-          replyTo = {
-            messageId: message.reference.messageId,
-            channelId: message.reference.channelId ?? undefined,
-            authorId: referencedMsg?.author?.id,
-            author: referencedMsg?.author?.username || referencedMsg?.author?.displayName
-          };
-        } catch {
-          replyTo = {
-            messageId: message.reference.messageId,
-            channelId: message.reference.channelId ?? undefined
-          };
-        }
+    // Determine if this bot should emit
+    let shouldEmit = false;
+    if (isFromKnownBot) {
+      // Never emit messages from known bots
+      shouldEmit = false;
+    } else if (priorityEmitter) {
+      // Attachment + targeted case: only priority emitter emits
+      if (botName === priorityEmitter) {
+        shouldEmit = true;
+        console.log(`[DiscordMessageReceptor:${botName}] I am priority emitter for attachment message`);
+      } else if (targetedBotNames.includes(botName)) {
+        // This bot is targeted but not priority emitter - skip both emit and activation
+        skipActivationForPriority = true;
+        console.log(`[DiscordMessageReceptor:${botName}] Skipping (targeted but not priority emitter, ${priorityEmitter} will handle)`);
+      } else {
+        console.log(`[DiscordMessageReceptor:${botName}] Not priority emitter, ${priorityEmitter} will emit`);
       }
+    } else {
+      // Normal case: use deduplication lottery
+      shouldEmit = messageDeduplicator.shouldEmit(message.id, botName);
+    }
 
-      // Cache user mentions for later resolution
-      this.userNameCache.set(message.author.username.toLowerCase(), message.author.id);
-      if (message.author.displayName) {
-        this.userNameCache.set(message.author.displayName.toLowerCase(), message.author.id);
-      }
-      for (const [, user] of message.mentions.users) {
-        this.userNameCache.set(user.username.toLowerCase(), user.id);
-        if (user.displayName) {
-          this.userNameCache.set(user.displayName.toLowerCase(), user.id);
+    if (shouldEmit) {
+      try {
+        const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
+
+        // Ensure stream exists on server
+        await this.bot.streamManager.getOrCreateStream(
+          message.channel.id,
+          {
+            channelName,
+            channelType: message.channel.isDMBased() ? 'dm' : 'text',
+            guildId: message.guild?.id ?? undefined,
+            guildName: message.guild?.name ?? undefined
+          }
+        );
+
+        // Process attachments - only the emitting bot does this
+        const processedAttachments = await this.processAttachments(message.attachments);
+        if (processedAttachments.length > 0) {
+          const imageCount = processedAttachments.filter(a => a.data).length;
+          console.log(`[DiscordMessageReceptor:${botName}] Processed ${processedAttachments.length} attachment(s), ${imageCount} with image data`);
         }
-      }
 
-      // Emit message to Connectome (for state tracking)
-      // Skip emitting for known bots - they record their own speech via agent:speech
-      // Use deduplication to ensure only one bot instance emits each message
-      const isFromKnownBot = this.state.botUserIdToName.has(message.author.id);
-      if (!isFromKnownBot && messageDeduplicator.shouldEmit(message.id, botName)) {
+        // Fetch reply info if this is a reply
+        let replyTo: { messageId?: string; channelId?: string; authorId?: string; author?: string } | undefined;
+        if (message.reference?.messageId) {
+          try {
+            const referencedMsg = await message.channel.messages.fetch(message.reference.messageId);
+            replyTo = {
+              messageId: message.reference.messageId,
+              channelId: message.reference.channelId ?? undefined,
+              authorId: referencedMsg?.author?.id,
+              author: referencedMsg?.author?.username || referencedMsg?.author?.displayName
+            };
+          } catch {
+            replyTo = {
+              messageId: message.reference.messageId,
+              channelId: message.reference.channelId ?? undefined
+            };
+          }
+        }
+
+        // Cache user mentions for later resolution
+        this.userNameCache.set(message.author.username.toLowerCase(), message.author.id);
+        if (message.author.displayName) {
+          this.userNameCache.set(message.author.displayName.toLowerCase(), message.author.id);
+        }
+        for (const [, user] of message.mentions.users) {
+          this.userNameCache.set(user.username.toLowerCase(), user.id);
+          if (user.displayName) {
+            this.userNameCache.set(user.displayName.toLowerCase(), user.id);
+          }
+        }
+
+        // Emit message to Connectome
         await this.bot.grpcClient.emitDiscordMessage({
           content: message.content,
           authorId: message.author.id,
@@ -227,9 +279,9 @@ export class DiscordMessageReceptor {
           targetBotName: mentionedBotName || replyToBotName
         });
         console.log(`[DiscordMessageReceptor:${botName}] Emitted message to Connectome from ${message.author.username}: ${message.content.substring(0, 50)}...`);
+      } catch (error: any) {
+        console.error(`[DiscordMessageReceptor:${botName}] Error emitting message to Connectome:`, error.message);
       }
-    } catch (error: any) {
-      console.error(`[DiscordMessageReceptor:${botName}] Error emitting message to Connectome:`, error.message);
     }
 
     // ========================================================================
@@ -273,6 +325,12 @@ export class DiscordMessageReceptor {
 
     // If not activating, we're done (message was already emitted to Connectome)
     if (!shouldActivate) {
+      return;
+    }
+
+    // Skip activation if this bot was targeted but not the priority emitter
+    // (The priority emitter will handle both emit and activation)
+    if (skipActivationForPriority) {
       return;
     }
 
