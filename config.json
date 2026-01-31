@@ -150,5 +150,6 @@
   "default_system_instruction": "Standard",
   "max_tokens": 4096,
   "max_conversation_frames": 100,
-  "max_memory_frames": 200
+  "max_memory_frames": 200,
+  "max_bot_mentions_per_conversation": 1
 }
