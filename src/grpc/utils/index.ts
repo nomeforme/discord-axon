@@ -3,5 +3,5 @@
  */
 
 export { cleanSpeechContent } from './speech-cleanup.js';
-export { resolveMentions, getUserNameCache } from './mention-resolver.js';
+export { resolveMentions, resolveIncomingMentions, getUserNameCache, getUserIdToNameCache } from './mention-resolver.js';
 export { splitMessage } from './message-splitter.js';

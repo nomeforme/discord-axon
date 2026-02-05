@@ -8,6 +8,7 @@ import type { StreamManager } from './stream-manager.js';
 import type { ToolLoopAgent } from '../tool-loop-agent.js';
 import type { AnthropicToolProvider } from '../anthropic-tool-provider.js';
 import type { BedrockProvider } from '../bedrock-provider.js';
+import type { MCPServerConfig } from '@connectome/grpc-common';
 
 /**
  * Bot configuration from config.json
@@ -19,6 +20,8 @@ export interface BotConfig {
   prompt?: string;
   max_tokens?: number;
   tools?: string[];
+  /** List of MCP server names this bot should use */
+  mcp?: string[];
   guild_id?: string | null;
   auto_join_channels?: string[];
 }
@@ -29,6 +32,8 @@ export interface BotConfig {
 export interface DiscordConfig {
   active_bots: string[];
   bots: BotConfig[];
+  /** Global MCP server configurations */
+  mcp_servers?: MCPServerConfig[];
   max_conversation_frames?: number;
   max_bot_mentions_per_conversation?: number;
   random_reply_chance?: number;

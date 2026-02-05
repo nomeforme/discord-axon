@@ -12,6 +12,7 @@ import { AnthropicToolProvider } from '../anthropic-tool-provider.js';
 import { BedrockProvider } from '../bedrock-provider.js';
 import { cleanSpeechContent, splitMessage } from './utils/index.js';
 import type { BotConfig, BotInstance, SharedState } from './types.js';
+import type { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Create a Discord.js client with proper intents
@@ -74,7 +75,8 @@ export function createBotInstance(
   botConfig: BotConfig,
   grpcHost: string,
   grpcPort: number,
-  guildId?: string
+  guildId?: string,
+  mcpManager?: MCPManager
 ): BotInstance {
   // Create Discord.js client
   const discord = createDiscordClient();
@@ -115,6 +117,13 @@ export function createBotInstance(
     if (botConfig.tools?.includes('fetch')) {
       agentTools.push(createFetchTool());
       console.log(`  🔧 ${botConfig.name}: fetch tool enabled`);
+    }
+
+    // Add MCP tools if configured
+    if (mcpManager && botConfig.mcp && botConfig.mcp.length > 0) {
+      const mcpTools = mcpManager.getToolHandlersForServers(botConfig.mcp);
+      agentTools.push(...mcpTools);
+      console.log(`  🔌 ${botConfig.name}: ${mcpTools.length} MCP tool(s) from [${botConfig.mcp.join(', ')}]`);
     }
 
     // Pass a stub object - ToolLoopAgent stores veilStateManager but never uses it

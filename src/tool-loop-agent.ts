@@ -25,6 +25,8 @@ export interface ToolHandler {
   name: string;
   description: string;
   parameters: Record<string, any>;
+  /** Optional list of required parameter names (if not set, all are assumed required) */
+  required?: string[];
   handler: (input: Record<string, any>) => Promise<string>;
 }
 
@@ -79,7 +81,8 @@ export class ToolLoopAgent {
       input_schema: {
         type: 'object' as const,
         properties: tool.parameters,
-        required: Object.keys(tool.parameters)
+        // Use explicit required array if provided, otherwise default to all parameters
+        required: tool.required ?? Object.keys(tool.parameters)
       }
     }));
   }

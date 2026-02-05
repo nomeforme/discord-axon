@@ -18,7 +18,7 @@ import sharp from 'sharp';
 const IMAGE_MAX_DIMENSION = 1024;
 const IMAGE_JPEG_QUALITY = 80;
 import { messageDeduplicator } from '../../message-deduplicator.js';
-import { getUserNameCache } from '../utils/mention-resolver.js';
+import { getUserNameCache, getUserIdToNameCache } from '../utils/mention-resolver.js';
 import type { BotInstance, SharedState, RuntimeConfig } from '../types.js';
 import type { DiscordAgentEffector } from './discord-agent-effector.js';
 import type { DiscordCommandEffector } from './discord-command-effector.js';
@@ -43,6 +43,7 @@ export class DiscordMessageReceptor {
   private commandEffector: DiscordCommandEffector;
   private updateConfig: (updates: Partial<RuntimeConfig>) => void;
   private userNameCache: Map<string, string>;
+  private userIdToNameCache: Map<string, string>;
 
   constructor(config: DiscordMessageReceptorConfig) {
     this.bot = config.bot;
@@ -51,6 +52,7 @@ export class DiscordMessageReceptor {
     this.commandEffector = config.commandEffector;
     this.updateConfig = config.updateConfig;
     this.userNameCache = getUserNameCache();
+    this.userIdToNameCache = getUserIdToNameCache();
   }
 
   /**
@@ -246,13 +248,15 @@ export class DiscordMessageReceptor {
           }
         }
 
-        // Cache user mentions for later resolution
+        // Cache user mentions for later resolution (both directions)
         this.userNameCache.set(message.author.username.toLowerCase(), message.author.id);
+        this.userIdToNameCache.set(message.author.id, message.author.displayName || message.author.username);
         if (message.author.displayName) {
           this.userNameCache.set(message.author.displayName.toLowerCase(), message.author.id);
         }
         for (const [, user] of message.mentions.users) {
           this.userNameCache.set(user.username.toLowerCase(), user.id);
+          this.userIdToNameCache.set(user.id, user.displayName || user.username);
           if (user.displayName) {
             this.userNameCache.set(user.displayName.toLowerCase(), user.id);
           }

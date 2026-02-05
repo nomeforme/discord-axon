@@ -12,6 +12,7 @@
  */
 
 import type { DiscordGrpcClient } from '../client.js';
+import { resolveIncomingMentions } from '../utils/mention-resolver.js';
 
 /**
  * Message format for LLM context
@@ -49,6 +50,7 @@ export interface FocusedContextTransformConfig {
   systemPrompt: string;
   maxConversationFrames: number;
   maxTokens: number;
+  botUserIdToName: Map<string, string>;
 }
 
 /**
@@ -62,6 +64,7 @@ export class FocusedContextTransform {
   private systemPrompt: string;
   private maxConversationFrames: number;
   private maxTokens: number;
+  private botUserIdToName: Map<string, string>;
 
   constructor(config: FocusedContextTransformConfig) {
     this.grpcClient = config.grpcClient;
@@ -69,6 +72,7 @@ export class FocusedContextTransform {
     this.systemPrompt = config.systemPrompt;
     this.maxConversationFrames = config.maxConversationFrames;
     this.maxTokens = config.maxTokens;
+    this.botUserIdToName = config.botUserIdToName;
   }
 
   /**
@@ -151,9 +155,15 @@ export class FocusedContextTransform {
         if (role === 'system') continue;
 
         if (role === 'user' || role === 'assistant') {
+          // Resolve Discord mention IDs (<@123456>) to readable @name format
+          const resolvedContent = resolveIncomingMentions(
+            msg.content || '',
+            this.botUserIdToName
+          );
+
           const message: ContextMessage = {
             role,
-            content: msg.content || ''
+            content: resolvedContent
           };
 
           // Preserve attachment metadata for LLM image processing
@@ -179,7 +189,7 @@ export class FocusedContextTransform {
   private buildSystemPrompt(): string {
     const identityPrompt = `You are <${this.botName}> in Discord.
 
-To mention users or other bots, use <@username> syntax. The system will convert usernames to Discord IDs automatically.`;
+To mention users or other bots, use @username syntax (e.g. @claude-opus-4-5). The system will convert usernames to Discord mentions automatically.`;
 
     if (this.systemPrompt && this.systemPrompt !== 'Standard') {
       return `${this.systemPrompt}\n\n${identityPrompt}`;

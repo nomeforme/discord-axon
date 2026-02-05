@@ -1,7 +1,16 @@
 {
+  "mcp_servers": [
+    {
+      "name": "everything",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    }
+  ],
   "active_bots": [
     "claude-sonnet-4-5",
     "claude-opus-4-5",
+    "claude-opus-4-6",
     "claude-3-opus",
     "claude-opus-4",
     "claude-haiku-4-5",
@@ -30,6 +39,17 @@
       "prompt": "Standard",
       "max_tokens": 4096,
       "tools": ["fetch"],
+      "mcp": ["everything"],
+      "guild_id": null,
+      "auto_join_channels": []
+    },
+    {
+      "name": "claude-opus-4-6",
+      "model": "claude-opus-4-6",
+      "prompt": "Standard",
+      "max_tokens": 4096,
+      "tools": ["fetch"],
+      "mcp": ["everything"],
       "guild_id": null,
       "auto_join_channels": []
     },

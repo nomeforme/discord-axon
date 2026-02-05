@@ -1,6 +1,7 @@
 /**
  * Mention resolution utilities for Discord
- * Resolves <@username> mentions to <@userid> format
+ * Resolves <@username> mentions to <@userid> format (outgoing)
+ * Resolves <@userid> mentions to @name format (incoming context)
  */
 
 import type { Guild } from 'discord.js';
@@ -8,12 +9,44 @@ import type { Guild } from 'discord.js';
 // Global cache for mention resolution (username -> Discord user ID)
 const userNameToId = new Map<string, string>();
 const roleNameToId = new Map<string, string>();
+// Reverse cache (Discord user ID -> display name) for incoming resolution
+const userIdToName = new Map<string, string>();
 
 /**
  * Get the user name cache (for adding entries from outside)
  */
 export function getUserNameCache(): Map<string, string> {
   return userNameToId;
+}
+
+/**
+ * Get the reverse user ID cache (for adding entries from outside)
+ */
+export function getUserIdToNameCache(): Map<string, string> {
+  return userIdToName;
+}
+
+/**
+ * Resolve Discord mention IDs to readable names in message content.
+ * Converts <@123456789> to @username for LLM context.
+ */
+export function resolveIncomingMentions(
+  content: string,
+  botUserIdToName: Map<string, string>
+): string {
+  // Match Discord mention patterns: <@ID> and <@!ID> (nickname mentions)
+  return content.replace(/<@!?(\d+)>/g, (match, id) => {
+    // Check bot names first
+    const botName = botUserIdToName.get(id);
+    if (botName) return `@${botName}`;
+
+    // Check cached user names
+    const userName = userIdToName.get(id);
+    if (userName) return `@${userName}`;
+
+    // Leave as-is if we can't resolve
+    return match;
+  });
 }
 
 /**
@@ -142,6 +175,42 @@ export async function resolveMentions(
       replacements.push({ from: `<@${name}>`, to: `<@${userId}>` });
     } else if (roleId) {
       replacements.push({ from: `<@${name}>`, to: `<@&${roleId}>` });
+    }
+  }
+
+  // Find bare @mentions: @username (without angle brackets)
+  // Bots see @name in context and naturally output @name format
+  // Sort bot names by length (longest first) to avoid partial matches
+  const botNames = [...botUserIdToName.entries()].sort((a, b) => b[1].length - a[1].length);
+  for (const [botUserId, botName] of botNames) {
+    const pattern = new RegExp(`@${botName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s,.:;!?)'"\\n]|$)`, 'gi');
+    const matches = [...content.matchAll(pattern)];
+    for (const match of matches) {
+      const matchStr = match[0];
+      // Skip if this is already inside angle brackets (handled above)
+      const idx = content.indexOf(matchStr);
+      if (idx > 0 && content[idx - 1] === '<') continue;
+
+      if (!replacements.some(r => r.from === matchStr)) {
+        replacements.push({ from: matchStr, to: `<@${botUserId}>` });
+        console.log(`[MentionResolver] Resolved bare ${matchStr} -> <@${botUserId}>`);
+      }
+    }
+  }
+
+  // Also check cached usernames for bare @mentions
+  for (const [name, userId] of userNameToId) {
+    const pattern = new RegExp(`@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\\s,.:;!?)'"\\n]|$)`, 'gi');
+    const matches = [...content.matchAll(pattern)];
+    for (const match of matches) {
+      const matchStr = match[0];
+      const idx = content.indexOf(matchStr);
+      if (idx > 0 && content[idx - 1] === '<') continue;
+
+      if (!replacements.some(r => r.from === matchStr)) {
+        replacements.push({ from: matchStr, to: `<@${userId}>` });
+        console.log(`[MentionResolver] Resolved bare ${matchStr} -> <@${userId}>`);
+      }
     }
   }
 

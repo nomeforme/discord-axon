@@ -35,6 +35,7 @@ import {
   type RuntimeConfig,
   type BotInstance
 } from './grpc/index.js';
+import { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Main entry point
@@ -65,6 +66,21 @@ async function main(): Promise<void> {
   }
 
   console.log();
+
+  // Initialize MCP servers (global pool)
+  const mcpManager = new MCPManager();
+  const mcpServers = (config as any).mcp_servers || [];
+
+  if (mcpServers.length > 0) {
+    console.log(`Connecting to ${mcpServers.length} MCP server(s)...`);
+    await mcpManager.connectAll(mcpServers);
+    const connectedServers = mcpManager.getConnectedServers();
+    console.log(`  Connected: ${connectedServers.join(', ') || '(none)'}`);
+    const allTools = mcpManager.getAllToolHandlers();
+    console.log(`  Total MCP tools available: ${allTools.length}`);
+    console.log();
+  }
+
   console.log(`Initializing ${pairedBots.length} bot(s)...`);
   console.log();
 
@@ -103,8 +119,8 @@ async function main(): Promise<void> {
   for (const botConfig of pairedBots) {
     console.log(`Initializing ${botConfig.name}...`);
 
-    // Create bot instance
-    const bot = createBotInstance(botConfig, host, port, guildId);
+    // Create bot instance (with MCP manager for tool access)
+    const bot = createBotInstance(botConfig, host, port, guildId, mcpManager);
     state.bots.set(botConfig.name, bot);
 
     // Create components following Connectome nomenclature
@@ -124,7 +140,8 @@ async function main(): Promise<void> {
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      maxTokens: botConfig.max_tokens || 50000
+      maxTokens: botConfig.max_tokens || 50000,
+      botUserIdToName: state.botUserIdToName
     });
     contextTransforms.push(contextTransform);
 
@@ -179,6 +196,12 @@ async function main(): Promise<void> {
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
+
+    // Disconnect MCP servers
+    if (mcpManager.getConnectedServers().length > 0) {
+      console.log('  Disconnecting MCP servers...');
+      await mcpManager.disconnectAll();
+    }
 
     for (const [botName, bot] of state.bots) {
       console.log(`  Disconnecting ${botName}...`);
