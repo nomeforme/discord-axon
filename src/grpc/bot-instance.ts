@@ -151,7 +151,8 @@ export function createBotInstance(
  */
 export function setupSpeechHandler(
   bot: BotInstance,
-  allBotNames: string[]
+  allBotNames: string[],
+  maxMessageLength?: number
 ): void {
   const botName = bot.config.name;
 
@@ -174,7 +175,7 @@ export function setupSpeechHandler(
       const channel = await bot.discord.channels.fetch(streamInfo.channelId);
       if (channel && 'send' in channel) {
         // Split if too long
-        const chunks = splitMessage(cleanedContent, 2000);
+        const chunks = splitMessage(cleanedContent, maxMessageLength);
         for (const chunk of chunks) {
           await channel.send(chunk);
         }

@@ -130,7 +130,8 @@ async function main(): Promise<void> {
       botConfig: bot.config,
       discordClient: bot.discord,
       streamManager: bot.streamManager,
-      allBotNames
+      allBotNames,
+      maxMessageLength: config.max_message_length
     });
     speechEffector.setup();
 
@@ -156,7 +157,8 @@ async function main(): Promise<void> {
         grpcClient: bot.grpcClient,
         discordClient: bot.discord,
         contextTransform,
-        botUserIdToName: state.botUserIdToName
+        botUserIdToName: state.botUserIdToName,
+        maxMessageLength: config.max_message_length
       });
     }
 

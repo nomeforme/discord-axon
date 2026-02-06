@@ -20,6 +20,7 @@ export interface DiscordSpeechEffectorConfig {
   discordClient: Client;
   streamManager: StreamManager;
   allBotNames: string[];
+  maxMessageLength?: number;
 }
 
 /**
@@ -32,12 +33,14 @@ export class DiscordSpeechEffector {
   private discordClient: Client;
   private streamManager: StreamManager;
   private allBotNames: string[];
+  private maxMessageLength?: number;
 
   constructor(config: DiscordSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.discordClient = config.discordClient;
     this.streamManager = config.streamManager;
     this.allBotNames = config.allBotNames;
+    this.maxMessageLength = config.maxMessageLength;
   }
 
   /**
@@ -91,7 +94,7 @@ export class DiscordSpeechEffector {
       const channel = await this.discordClient.channels.fetch(streamInfo.channelId);
       if (channel && 'send' in channel) {
         // Split if too long
-        const chunks = splitMessage(cleanedContent, 2000);
+        const chunks = splitMessage(cleanedContent, this.maxMessageLength);
         for (const chunk of chunks) {
           await channel.send(chunk);
         }

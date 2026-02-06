@@ -37,6 +37,7 @@ export interface DiscordConfig {
   max_conversation_frames?: number;
   max_bot_mentions_per_conversation?: number;
   random_reply_chance?: number;
+  max_message_length?: number;
 }
 
 /**

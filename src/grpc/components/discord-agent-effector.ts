@@ -26,6 +26,7 @@ export interface DiscordAgentEffectorConfig {
   discordClient: Client;
   contextTransform: FocusedContextTransform;
   botUserIdToName: Map<string, string>;
+  maxMessageLength?: number;
 }
 
 export interface AgentActivation {
@@ -47,6 +48,7 @@ export class DiscordAgentEffector {
   private discordClient: Client;
   private contextTransform: FocusedContextTransform;
   private botUserIdToName: Map<string, string>;
+  private maxMessageLength?: number;
   private processingActivations = new Set<string>();
 
   constructor(config: DiscordAgentEffectorConfig) {
@@ -56,6 +58,7 @@ export class DiscordAgentEffector {
     this.discordClient = config.discordClient;
     this.contextTransform = config.contextTransform;
     this.botUserIdToName = config.botUserIdToName;
+    this.maxMessageLength = config.maxMessageLength;
   }
 
   /**
@@ -172,7 +175,7 @@ export class DiscordAgentEffector {
         );
 
         // Split and send
-        const chunks = splitMessage(cleanedContent, 2000);
+        const chunks = splitMessage(cleanedContent, this.maxMessageLength);
         for (const chunk of chunks) {
           await channel.send(chunk);
         }
