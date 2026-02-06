@@ -49,7 +49,6 @@ export interface FocusedContextTransformConfig {
   botName: string;
   systemPrompt: string;
   maxConversationFrames: number;
-  maxTokens: number;
   botUserIdToName: Map<string, string>;
 }
 
@@ -63,7 +62,6 @@ export class FocusedContextTransform {
   private botName: string;
   private systemPrompt: string;
   private maxConversationFrames: number;
-  private maxTokens: number;
   private botUserIdToName: Map<string, string>;
 
   constructor(config: FocusedContextTransformConfig) {
@@ -71,7 +69,6 @@ export class FocusedContextTransform {
     this.botName = config.botName;
     this.systemPrompt = config.systemPrompt;
     this.maxConversationFrames = config.maxConversationFrames;
-    this.maxTokens = config.maxTokens;
     this.botUserIdToName = config.botUserIdToName;
   }
 
@@ -92,19 +89,16 @@ export class FocusedContextTransform {
     streamId: string,
     options?: {
       maxFrames?: number;
-      maxTokens?: number;
     }
   ): Promise<RenderedContext> {
     const maxFrames = options?.maxFrames ?? this.maxConversationFrames;
-    const maxTokens = options?.maxTokens ?? this.maxTokens;
 
     console.log(`[FocusedContextTransform:${this.botName}] Fetching context for stream ${streamId} (maxFrames=${maxFrames})`);
 
     try {
       // Fetch context from server via gRPC
       const serverContext = await this.grpcClient.getContext(streamId, {
-        maxFrames,
-        maxTokens
+        maxFrames
       });
 
       console.log(`[FocusedContextTransform:${this.botName}] Received context from server`);

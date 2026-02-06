@@ -140,7 +140,6 @@ async function main(): Promise<void> {
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      maxTokens: botConfig.max_tokens || 50000,
       botUserIdToName: state.botUserIdToName
     });
     contextTransforms.push(contextTransform);

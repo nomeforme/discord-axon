@@ -103,7 +103,7 @@ export function createBotInstance(
 
   // Create LLM provider and ToolLoopAgent
   const modelName = botConfig.model || 'claude-sonnet-4-20250514';
-  const maxTokens = botConfig.max_tokens || 4096;
+  const maxTokens = botConfig.max_tokens || 1024;
   const llmProvider = createLlmProvider(modelName, maxTokens);
 
   if (llmProvider) {
