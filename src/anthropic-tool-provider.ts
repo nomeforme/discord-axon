@@ -109,14 +109,15 @@ export class AnthropicToolProvider implements LLMProvider {
 
             if (isImage) {
               try {
-                const imageUrl = attachment.url || attachment.data;
-                if (!imageUrl) continue;
+                // Prefer pre-compressed base64 data over URL to avoid refetching uncompressed original
+                const imageSource = attachment.data || attachment.url;
+                if (!imageSource) continue;
 
                 let imageData: string;
-                if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-                  imageData = await this.fetchImageAsBase64(imageUrl);
+                if (imageSource.startsWith('http://') || imageSource.startsWith('https://')) {
+                  imageData = await this.fetchImageAsBase64(imageSource);
                 } else {
-                  imageData = imageUrl;
+                  imageData = imageSource;
                 }
 
                 // Use validated media type detection (checks actual bytes, not just declared type)

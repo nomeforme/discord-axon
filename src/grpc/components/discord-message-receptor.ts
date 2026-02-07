@@ -17,6 +17,7 @@ import sharp from 'sharp';
 // Image compression settings (match signal-axon)
 const IMAGE_MAX_DIMENSION = 1024;
 const IMAGE_JPEG_QUALITY = 80;
+const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB base64, under 5MB API limit)
 import { messageDeduplicator } from '../../message-deduplicator.js';
 import { getUserNameCache, getUserIdToNameCache } from '../utils/mention-resolver.js';
 import type { BotInstance, SharedState, RuntimeConfig } from '../types.js';
@@ -446,10 +447,9 @@ export class DiscordMessageReceptor {
         return base64;
       }
 
-      // Fallback to original if compression fails
-      const base64 = buffer.toString('base64');
-      console.log(`[DiscordMessageReceptor:${botName}] Downloaded attachment (uncompressed): ${base64.length} bytes (base64)`);
-      return base64;
+      // Compression failed - skip rather than sending uncompressed (could exceed API limits)
+      console.warn(`[DiscordMessageReceptor:${botName}] Compression failed, skipping attachment (${originalSize} bytes)`);
+      return null;
     } catch (error) {
       console.error(`[DiscordMessageReceptor:${botName}] Error downloading attachment:`, error);
       return null;
@@ -474,9 +474,9 @@ export class DiscordMessageReceptor {
       const maxDim = Math.max(width, height);
       const needsResize = maxDim > IMAGE_MAX_DIMENSION;
 
-      // Skip compression for small images that are already JPEG
-      if (!needsResize && format === 'jpeg') {
-        console.log(`[DiscordMessageReceptor:${botName}] Image already optimized (${width}x${height} ${format})`);
+      // Skip compression for small JPEGs that are already under size limit
+      if (!needsResize && format === 'jpeg' && buffer.length <= IMAGE_MAX_BYTES) {
+        console.log(`[DiscordMessageReceptor:${botName}] Image already optimized (${width}x${height} ${format}, ${buffer.length} bytes)`);
         return buffer;
       }
 
@@ -492,11 +492,27 @@ export class DiscordMessageReceptor {
       }
 
       // Convert to JPEG
-      const compressed = await pipeline
+      let compressed = await pipeline
         .jpeg({ quality: IMAGE_JPEG_QUALITY })
         .toBuffer();
 
-      console.log(`[DiscordMessageReceptor:${botName}] Compressed image: ${width}x${height} ${format} -> JPEG (${needsResize ? 'resized' : 'same size'})`);
+      // If still too large, recompress with lower quality and smaller dimensions
+      if (compressed.length > IMAGE_MAX_BYTES) {
+        console.log(`[DiscordMessageReceptor:${botName}] First pass too large (${compressed.length} bytes), recompressing`);
+        compressed = await sharp(compressed)
+          .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 50 })
+          .toBuffer();
+      }
+      if (compressed.length > IMAGE_MAX_BYTES) {
+        console.log(`[DiscordMessageReceptor:${botName}] Second pass still too large (${compressed.length} bytes), recompressing aggressively`);
+        compressed = await sharp(compressed)
+          .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 30 })
+          .toBuffer();
+      }
+
+      console.log(`[DiscordMessageReceptor:${botName}] Compressed image: ${width}x${height} ${format} -> JPEG ${compressed.length} bytes (${needsResize ? 'resized' : 'same size'})`);
       return compressed;
     } catch (error) {
       console.error(`[DiscordMessageReceptor:${botName}] Image compression failed:`, error);
