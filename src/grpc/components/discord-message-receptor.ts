@@ -98,16 +98,19 @@ export class DiscordMessageReceptor {
       this.state.botInteractionCounts.set(streamId, 0);
     }
 
-    // Check if a specific bot was mentioned in this message
-    const mentionedBotName = message.mentions.users
-      .map(u => this.state.botUserIdToName.get(u.id))
-      .find(name => name !== undefined);
+    // Check if THIS bot was mentioned, and if ANY bot was mentioned
+    const thisBotMentioned = message.mentions.users.some(
+      u => this.state.botUserIdToName.get(u.id) === botName
+    );
+    const anyBotMentioned = message.mentions.users.some(
+      u => this.state.botUserIdToName.has(u.id)
+    );
 
     // Handle ! commands (commands bypass normal message flow)
     if (contentWithoutMentions.startsWith('!')) {
       // If a bot was mentioned, only that bot handles the command
-      if (mentionedBotName) {
-        if (mentionedBotName !== botName) {
+      if (anyBotMentioned) {
+        if (!thisBotMentioned) {
           return; // Not the mentioned bot, skip
         }
       } else {
@@ -280,7 +283,7 @@ export class DiscordMessageReceptor {
             username: u.username
           })),
           replyTo,
-          targetBotName: mentionedBotName || replyToBotName
+          targetBotName: targetedBotNames[0] || replyToBotName
         });
         console.log(`[DiscordMessageReceptor:${botName}] Emitted message to Connectome from ${message.author.username}: ${message.content.substring(0, 50)}...`);
       } catch (error: any) {
@@ -295,20 +298,16 @@ export class DiscordMessageReceptor {
     let shouldActivate = false;
     let activationReason = '';
 
-    if (mentionedBotName) {
-      if (mentionedBotName === botName) {
-        shouldActivate = true;
-        activationReason = 'mentioned';
-        console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... mentions me, will activate`);
-      }
-      // If another bot was mentioned, don't activate (but message was still emitted above)
-    } else if (replyToBotName) {
-      if (replyToBotName === botName) {
-        shouldActivate = true;
-        activationReason = 'reply';
-        console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... is reply to me, will activate`);
-      }
-      // If reply to another bot, don't activate (but message was still emitted above)
+    if (thisBotMentioned) {
+      shouldActivate = true;
+      activationReason = 'mentioned';
+      console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... mentions me, will activate`);
+    } else if (replyToBotName === botName) {
+      shouldActivate = true;
+      activationReason = 'reply';
+      console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... is reply to me, will activate`);
+    } else if (anyBotMentioned || replyToBotName) {
+      // Another bot was targeted (mentioned or replied to), don't activate
     } else {
       // No bot mentioned or replied to - check for random reply
       const randomChance = this.state.runtimeConfig.randomReplyChance;
