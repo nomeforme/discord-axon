@@ -15,12 +15,12 @@
 import type { Client, Guild, TextChannel } from 'discord.js';
 import { cleanSpeechContent, resolveMentions, splitMessage } from '../utils/index.js';
 import type { DiscordGrpcClient } from '../client.js';
-import type { ToolLoopAgent } from '../../tool-loop-agent.js';
+import { type ConnectomeAgent, renderedContextToAgentContext } from '@connectome/agent-core';
 import type { BotConfig } from '../types.js';
 import type { FocusedContextTransform } from './focused-context-transform.js';
 
 export interface DiscordAgentEffectorConfig {
-  agent: ToolLoopAgent;
+  agent: ConnectomeAgent;
   botConfig: BotConfig;
   grpcClient: DiscordGrpcClient;
   discordClient: Client;
@@ -42,7 +42,7 @@ export interface AgentActivation {
  * Constraint equivalent: EFFECTOR priority (runs after transforms to produce side effects)
  */
 export class DiscordAgentEffector {
-  private agent: ToolLoopAgent;
+  private agent: ConnectomeAgent;
   private botConfig: BotConfig;
   private grpcClient: DiscordGrpcClient;
   private discordClient: Client;
@@ -82,7 +82,7 @@ export class DiscordAgentEffector {
       return false;
     }
 
-    this.processingActivations.add(activationId);
+    this.processingActivations.add(streamId);
     console.log(`[DiscordAgentEffector:${botName}] Running agent cycle for activation ${activationId}...`);
 
     // Send typing indicator
@@ -121,8 +121,9 @@ export class DiscordAgentEffector {
       // Build stream reference
       const streamRef = { streamId, streamType: 'discord' };
 
-      // Run the tool-loop agent cycle
-      const result = await this.agent.runCycle(renderedContext as any, streamRef);
+      // Convert to pi-agent context and run the agent cycle
+      const agentContext = renderedContextToAgentContext(renderedContext);
+      const result = await this.agent.runWithContext(agentContext, streamRef);
 
       console.log(`[DiscordAgentEffector:${botName}] Agent cycle completed with ${result.operations.length} operations, content length: ${result.content.length}`);
 
@@ -145,7 +146,7 @@ export class DiscordAgentEffector {
       if (typingInterval) {
         clearInterval(typingInterval);
       }
-      this.processingActivations.delete(activationId);
+      this.processingActivations.delete(streamId);
     }
   }
 

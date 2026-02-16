@@ -55,9 +55,10 @@
     },
     {
       "name": "claude-3-opus",
-      "model": "bedrock-claude-3-opus-20240229",
+      "model": "us.anthropic.claude-3-opus-20240229-v1:0",
       "prompt": "Standard",
       "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -82,27 +83,30 @@
     },
     {
       "name": "claude-3-sonnet",
-      "model": "bedrock-claude-3-sonnet-20240229",
+      "model": "us.anthropic.claude-3-sonnet-20240229-v1:0",
       "prompt": "Standard",
       "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
     },
     {
       "name": "claude-3-5-sonnet",
-      "model": "bedrock-claude-3-5-sonnet-20240620",
+      "model": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
       "prompt": "Standard",
       "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
     },
     {
       "name": "claude-3-6-sonnet",
-      "model": "bedrock-claude-3-5-sonnet-20241022",
+      "model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
       "prompt": "Standard",
       "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []

@@ -27,9 +27,13 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@connectome/agent-core": "file:../connectome-agent-core",
     "@connectome/axon-interfaces": "file:../connectome-axon-interfaces",
     "@connectome/axon-server": "file:../axon-server",
     "@connectome/grpc-common": "file:../connectome-grpc-common",
+    "@mariozechner/pi-ai": "^0.52.9",
+    "@mariozechner/pi-agent-core": "^0.52.9",
+    "@sinclair/typebox": "^0.34.41",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.9",
     "connectome-ts": "file:../connectome-ts",
