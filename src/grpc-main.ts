@@ -141,7 +141,8 @@ async function main(): Promise<void> {
       botName: botConfig.name,
       systemPrompt: botConfig.prompt || 'Standard',
       maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      botUserIdToName: state.botUserIdToName
+      botUserIdToName: state.botUserIdToName,
+      skipIdentityPrompt: botConfig.skip_identity_prompt,
     });
     contextTransforms.push(contextTransform);
 

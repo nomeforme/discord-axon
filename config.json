@@ -21,7 +21,8 @@
     "claude-opus-4-1",
     "claude-3-5-haiku",
     "claude-3-haiku",
-    "claude-3-7-sonnet"
+    "claude-3-7-sonnet",
+    "claude-sonnet-4-6"
   ],
   "bots": [
     {
@@ -51,15 +52,24 @@
       "tools": ["fetch"],
       "mcp": ["everything"],
       "guild_id": null,
-      "auto_join_channels": []
+      "auto_join_channels": [],
+      "skill_paths": [
+        "/workspace/skills/connectome-ontology",
+        "/workspace/pi-skills/brave-search"
+      ],
+      "rlm": {
+        "maxDepth": 2,
+        "maxCalls": 10,
+        "timeoutSeconds": 300
+      }
     },
     {
       "name": "claude-3-opus",
-      "model": "us.anthropic.claude-3-opus-20240229-v1:0",
+      "model": "claude-3-opus-20240229",
       "prompt": "Standard",
       "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
+      "tools": [],
+      "skip_identity_prompt": false,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -131,9 +141,10 @@
     },
     {
       "name": "claude-3-5-haiku",
-      "model": "claude-3-5-haiku-20241022",
+      "model": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
       "prompt": "Standard",
       "max_tokens": 1024,
+      "prompt_caching": false,
       "tools": ["fetch"],
       "guild_id": null,
       "auto_join_channels": []
@@ -149,7 +160,17 @@
     },
     {
       "name": "claude-3-7-sonnet",
-      "model": "claude-3-7-sonnet-20250219",
+      "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+      "prompt": "Standard",
+      "max_tokens": 1024,
+      "prompt_caching": false,
+      "tools": ["fetch"],
+      "guild_id": null,
+      "auto_join_channels": []
+    },
+    {
+      "name": "claude-sonnet-4-6",
+      "model": "claude-sonnet-4-6",
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],

@@ -50,6 +50,7 @@ export interface FocusedContextTransformConfig {
   systemPrompt: string;
   maxConversationFrames: number;
   botUserIdToName: Map<string, string>;
+  skipIdentityPrompt?: boolean;
 }
 
 /**
@@ -63,6 +64,7 @@ export class FocusedContextTransform {
   private systemPrompt: string;
   private maxConversationFrames: number;
   private botUserIdToName: Map<string, string>;
+  private skipIdentityPrompt: boolean;
 
   constructor(config: FocusedContextTransformConfig) {
     this.grpcClient = config.grpcClient;
@@ -70,6 +72,7 @@ export class FocusedContextTransform {
     this.systemPrompt = config.systemPrompt;
     this.maxConversationFrames = config.maxConversationFrames;
     this.botUserIdToName = config.botUserIdToName;
+    this.skipIdentityPrompt = config.skipIdentityPrompt ?? false;
   }
 
   /**
@@ -181,12 +184,15 @@ export class FocusedContextTransform {
    * Build system prompt with bot identity and Discord capabilities
    */
   private buildSystemPrompt(): string {
-    const identityPrompt = `You are <${this.botName}> in Discord.
+    const identityPrompt = this.skipIdentityPrompt ? '' : `You are <${this.botName}> in Discord.
 
 To mention users or other bots, use @username syntax (e.g. @claude-opus-4-5). The system will convert usernames to Discord mentions automatically.`;
 
     if (this.systemPrompt && this.systemPrompt !== 'Standard') {
-      return `${this.systemPrompt}\n\n${identityPrompt}`;
+      if (identityPrompt) {
+        return `${this.systemPrompt}\n\n${identityPrompt}`;
+      }
+      return this.systemPrompt;
     }
 
     return identityPrompt;

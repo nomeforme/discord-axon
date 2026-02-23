@@ -94,8 +94,17 @@ export function createBotInstance(
       model,
       toolHandlers,
       promptCaching: botConfig.prompt_caching,
+      maxOutputTokens: botConfig.max_tokens,
+      skillPaths: botConfig.skill_paths,
+      rlm: botConfig.rlm,
     });
     console.log(`  Created ConnectomeAgent for ${botConfig.name} (${modelName})`);
+    if (botConfig.skill_paths?.length) {
+      console.log(`  📚 ${botConfig.name}: ${botConfig.skill_paths.length} skill path(s)`);
+    }
+    if (botConfig.rlm) {
+      console.log(`  🔄 ${botConfig.name}: RLM enabled (maxDepth=${botConfig.rlm.maxDepth ?? 3}, maxCalls=${botConfig.rlm.maxCalls ?? '∞'})`);
+    }
   } else {
     console.warn(`  No model found for ${botConfig.name} (${modelName}) - agent responses disabled`);
   }
