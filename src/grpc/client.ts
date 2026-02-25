@@ -465,7 +465,8 @@ export class DiscordGrpcClient extends EventEmitter {
    */
   async activateAgent(
     streamId: string,
-    reason?: string
+    reason?: string,
+    metadata?: Record<string, string>
   ): Promise<{ success: boolean; activationId: string }> {
     if (!this.agentHandle) {
       throw new Error('Not connected - call connect() first');
@@ -476,7 +477,8 @@ export class DiscordGrpcClient extends EventEmitter {
       streamId,
       {
         reason: reason || 'discord message received',
-        priority: 'normal'
+        priority: 'normal',
+        metadata
       }
     );
 

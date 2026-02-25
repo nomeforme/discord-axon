@@ -10,8 +10,8 @@
  * handles client-side agent execution).
  */
 
-import type { Client } from 'discord.js';
-import { cleanSpeechContent, splitMessage } from '../utils/index.js';
+import type { Client, Guild, TextChannel } from 'discord.js';
+import { cleanSpeechContent, resolveMentions, splitMessage } from '../utils/index.js';
 import type { StreamManager, StreamInfo } from '../stream-manager.js';
 import type { BotConfig } from '../types.js';
 
@@ -20,7 +20,10 @@ export interface DiscordSpeechEffectorConfig {
   discordClient: Client;
   streamManager: StreamManager;
   allBotNames: string[];
+  remoteBotNames: string[];
   maxMessageLength?: number;
+  botUserIdToName: Map<string, string>;
+  activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
 }
 
 /**
@@ -33,14 +36,20 @@ export class DiscordSpeechEffector {
   private discordClient: Client;
   private streamManager: StreamManager;
   private allBotNames: string[];
+  private remoteBotNames: string[];
   private maxMessageLength?: number;
+  private botUserIdToName: Map<string, string>;
+  private activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
 
   constructor(config: DiscordSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
     this.discordClient = config.discordClient;
     this.streamManager = config.streamManager;
     this.allBotNames = config.allBotNames;
+    this.remoteBotNames = config.remoteBotNames;
     this.maxMessageLength = config.maxMessageLength;
+    this.botUserIdToName = config.botUserIdToName;
+    this.activeTypingIntervals = config.activeTypingIntervals;
   }
 
   /**
@@ -76,29 +85,48 @@ export class DiscordSpeechEffector {
   private async handleSpeech(facet: any, streamInfo: StreamInfo): Promise<void> {
     const botName = this.botConfig.name;
 
-    // Skip speech from any bot in our system - they all send directly to Discord
-    const isFromOurBot = this.allBotNames.includes(facet.agentId || '') ||
-                         this.allBotNames.includes(facet.agentName || '');
-    if (isFromOurBot) {
-      console.log(`[DiscordSpeechEffector:${botName}] Skipping speech from our bot ${facet.agentName || facet.agentId}`);
+    // Determine speaker identity
+    const speakerName = facet.agentName || facet.agentId || '';
+    const isFromOurBot = this.allBotNames.includes(speakerName) || this.allBotNames.includes(facet.agentId || '') || this.allBotNames.includes(facet.agentName || '');
+    const isRemote = this.remoteBotNames.includes(speakerName) || this.remoteBotNames.includes(facet.agentId || '') || this.remoteBotNames.includes(facet.agentName || '');
+
+    // Skip speech from LOCAL bots (they send directly to Discord via DiscordAgentEffector)
+    if (isFromOurBot && !isRemote) {
       return;
     }
 
-    console.log(`[DiscordSpeechEffector:${botName}] Sending message to ${streamInfo.channelName || streamInfo.channelId}`);
+    // For remote bot speech, only THIS bot's effector should deliver (avoid duplicates from other bots)
+    if (isRemote && speakerName !== botName && facet.agentName !== botName) {
+      return;
+    }
+
+    console.log(`[DiscordSpeechEffector:${botName}] Sending message to ${streamInfo.channelName || streamInfo.channelId}${isRemote ? ` (remote bot: ${speakerName})` : ''}`);
 
     try {
       // Clean speech content (strip XML tags, extract tool syntax)
-      const cleanedContent = cleanSpeechContent(facet.content || '');
+      let cleanedContent = cleanSpeechContent(facet.content || '');
       if (!cleanedContent) return;
 
       const channel = await this.discordClient.channels.fetch(streamInfo.channelId);
       if (channel && 'send' in channel) {
+        // Resolve @mentions for remote bot speech
+        if ('guild' in channel) {
+          cleanedContent = await resolveMentions(cleanedContent, (channel as TextChannel).guild, this.botUserIdToName);
+        }
+
         // Split if too long
         const chunks = splitMessage(cleanedContent, this.maxMessageLength);
         for (const chunk of chunks) {
           await channel.send(chunk);
         }
         console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length} chunk(s)`);
+
+        // Clear typing indicator for this stream
+        const typingInterval = this.activeTypingIntervals?.get(streamInfo.streamId);
+        if (typingInterval) {
+          clearInterval(typingInterval);
+          this.activeTypingIntervals?.delete(streamInfo.streamId);
+        }
       }
     } catch (error: any) {
       console.error(`[DiscordSpeechEffector:${botName}] Error sending message:`, error.message);

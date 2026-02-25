@@ -3,7 +3,7 @@
  */
 
 import type { IPersistentMetadata } from '@connectome/axon-interfaces';
-import type { IAxonEnvironment } from 'connectome-ts/src/axon/interfaces';
+import type { IAxonEnvironment } from 'connectome-ts';
 
 export function createModule(env: IAxonEnvironment) {
   const { InteractiveComponent, Component } = env;

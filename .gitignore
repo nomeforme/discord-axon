@@ -35,3 +35,11 @@ Thumbs.db
 discord-host-state/snapshots/
 discord-host-state/snapshots/*
 discord-host-state/
+.gitnexus
+
+*.tsbuildinfo
+.turbo/
+.claude/
+
+.turbo/
+.claude/

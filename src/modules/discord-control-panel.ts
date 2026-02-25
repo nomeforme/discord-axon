@@ -6,9 +6,8 @@
  */
 
 // Import types
-import type { IAxonEnvironment } from 'connectome-ts/src/axon/interfaces';
+import type { IAxonEnvironment, SpaceEvent } from 'connectome-ts';
 import type { IPersistentMetadata } from '@connectome/axon-interfaces';
-import type { SpaceEvent } from 'connectome-ts/src/spaces/types';
 
 // Guild and channel info types
 interface GuildInfo {

@@ -8,7 +8,7 @@
  * - Does NOT touch VEIL state directly
  */
 
-import type { IAxonEnvironment } from 'connectome-ts/src/axon/interfaces';
+import type { IAxonEnvironment } from 'connectome-ts';
 
 interface DiscordConfig {
   serverUrl: string;

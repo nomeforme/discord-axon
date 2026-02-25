@@ -10,8 +10,9 @@ import type {
   LLMProvider,
   LLMMessage,
   LLMOptions,
-  LLMResponse
-} from 'connectome-ts/dist/llm/llm-interface.js';
+  LLMResponse,
+  LLMStreamChunk
+} from 'connectome-ts';
 import type { ToolSchema, ToolLLMOptions, ToolLLMResponse } from './anthropic-tool-provider.js';
 
 export interface BedrockProviderConfig {
@@ -497,9 +498,9 @@ export class BedrockProvider implements LLMProvider {
   }
 
   async *generateStream(
-    messages: import('connectome-ts').LLMMessage[],
-    options?: import('connectome-ts').LLMOptions
-  ): AsyncIterable<import('connectome-ts').LLMStreamChunk> {
+    messages: LLMMessage[],
+    options?: LLMOptions
+  ): AsyncIterable<LLMStreamChunk> {
     // BedrockProvider uses generate() for tool support, not streaming
     throw new Error('BedrockProvider does not support streaming - use generate() instead');
   }

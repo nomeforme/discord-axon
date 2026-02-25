@@ -115,6 +115,7 @@ async function main(): Promise<void> {
 
   // Initialize each bot
   const allBotNames = pairedBots.map(b => b.name);
+  const remoteBotNames = pairedBots.filter(b => b.remote).map(b => b.name);
 
   for (const botConfig of pairedBots) {
     console.log(`Initializing ${botConfig.name}...`);
@@ -131,7 +132,10 @@ async function main(): Promise<void> {
       discordClient: bot.discord,
       streamManager: bot.streamManager,
       allBotNames,
-      maxMessageLength: config.max_message_length
+      remoteBotNames,
+      maxMessageLength: config.max_message_length,
+      botUserIdToName: state.botUserIdToName,
+      activeTypingIntervals: bot.activeTypingIntervals
     });
     speechEffector.setup();
 
@@ -149,7 +153,7 @@ async function main(): Promise<void> {
     // 2. DiscordCommandEffector - handles ! commands
     const commandEffector = new DiscordCommandEffector(botConfig.name);
 
-    // 3. DiscordAgentEffector - runs agent and sends responses
+    // 3. DiscordAgentEffector - runs agent and sends responses (local bots only)
     let agentEffector: DiscordAgentEffector | undefined;
     if (bot.agent) {
       agentEffector = new DiscordAgentEffector({
@@ -171,18 +175,15 @@ async function main(): Promise<void> {
     readyReceptor.setup();
 
     // 5. DiscordMessageReceptor - handles Discord messages
-    if (agentEffector) {
-      const messageReceptor = new DiscordMessageReceptor({
-        bot,
-        state,
-        agentEffector,
-        commandEffector,
-        updateConfig: updateRuntimeConfig
-      });
-      messageReceptor.setup();
-    } else {
-      console.warn(`  ${botConfig.name}: No agent configured, message handling disabled`);
-    }
+    //    Always created: remote bots still need emission + gRPC activation
+    const messageReceptor = new DiscordMessageReceptor({
+      bot,
+      state,
+      agentEffector,   // undefined for remote bots — triggers gRPC activation path
+      commandEffector,
+      updateConfig: updateRuntimeConfig
+    });
+    messageReceptor.setup();
 
     // 6. DiscordInteractionReceptor - handles slash commands, buttons
     const interactionReceptor = new DiscordInteractionReceptor({ bot });

@@ -28,6 +28,8 @@ export interface BotConfig {
   auto_join_channels?: string[];
   /** Paths to skill directories to load */
   skill_paths?: string[];
+  /** Remote mode: discord-axon keeps Discord connection but delegates cognition to external bot-runtime */
+  remote?: boolean;
   /** RLM (recursive sub-agent) configuration */
   rlm?: {
     maxDepth?: number;
@@ -74,6 +76,8 @@ export interface BotInstance {
   streamManager: StreamManager;
   userId?: string;
   agent?: ConnectomeAgent;
+  /** Active typing intervals for remote bot activations, keyed by streamId */
+  activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
 }
 
 /**

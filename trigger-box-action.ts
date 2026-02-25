@@ -3,8 +3,7 @@
  * Manually trigger box creation by connecting to running host and emitting element:action
  */
 
-import { Space } from 'connectome-ts/src/spaces/space';
-import { VEILStateManager } from 'connectome-ts/src/veil/veil-state';
+import { Space, VEILStateManager } from 'connectome-ts';
 
 async function main() {
   console.log('🧪 Manual Box Creation Test\n');

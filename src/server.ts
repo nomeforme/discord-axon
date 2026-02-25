@@ -23,7 +23,8 @@ import {
   InteractionType,
   ComponentType
 } from 'discord.js';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import type { IncomingMessage } from 'http';
 import { AxonModuleServer } from '@connectome/axon-server';
 import { join } from 'path';
 import { loadConfig, DiscordConfig } from './config';
@@ -70,12 +71,12 @@ export interface BotConfig {
 
 class CombinedDiscordAxonServer {
   private app = express();
-  private wss: WebSocket.Server;
+  private wss: WebSocketServer;
   private bots = new Map<string, DiscordBotClient>();  // Map of botId -> DiscordBotClient
   private allBotUserIds = new Set<string>();  // Set of all bot Discord user IDs for deduplication
   private connections = new Map<string, AxonConnection>();
   private moduleServer: AxonModuleServer;
-  private hotReloadWss?: WebSocket.Server;
+  private hotReloadWss?: WebSocketServer;
 
   constructor(
     private httpPort: number = 8080,
@@ -83,7 +84,7 @@ class CombinedDiscordAxonServer {
     private modulePort: number = 8082
   ) {
     // WebSocket server for AXON connections
-    this.wss = new WebSocket.Server({ port: wsPort });
+    this.wss = new WebSocketServer({ port: wsPort });
 
     // Create module server
     this.moduleServer = new AxonModuleServer({
@@ -194,12 +195,12 @@ class CombinedDiscordAxonServer {
   private async registerDiscordModules(): Promise<void> {
     // Determine if running from compiled dist/ or source src/
     // Check if current file ends with .ts (dev/ts-node) or .js (compiled)
-    const isCompiledContext = __filename.endsWith('.js') && __dirname.includes('/dist');
-    const isDevelopment = __filename.endsWith('.ts') || !__dirname.includes('/dist');
+    const isCompiledContext = import.meta.filename.endsWith('.js') && import.meta.dirname.includes('/dist');
+    const isDevelopment = import.meta.filename.endsWith('.ts') || !import.meta.dirname.includes('/dist');
 
     const modulesDir = isCompiledContext
-      ? join(__dirname, '..', 'src', 'modules')  // dist/ -> ../src/modules
-      : join(__dirname, 'modules');              // src/ -> modules (when running from src/)
+      ? join(import.meta.dirname, '..', 'src', 'modules')  // dist/ -> ../src/modules
+      : join(import.meta.dirname, 'modules');              // src/ -> modules (when running from src/)
 
     console.log(`[Server] Module registration - isDev: ${isDevelopment}, modulesDir: ${modulesDir}`);
     
@@ -366,7 +367,7 @@ class CombinedDiscordAxonServer {
   }
   
   private setupWebSocket() {
-    this.wss.on('connection', (ws, req) => {
+    this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const url = new URL(req.url!, `http://localhost:${this.httpPort}`);
       const path = url.pathname;
       
@@ -378,7 +379,7 @@ class CombinedDiscordAxonServer {
       console.log('[Server] New WebSocket connection');
       
       // Wait for auth message
-      ws.on('message', async (data) => {
+      ws.on('message', async (data: WebSocket.RawData) => {
         try {
           const msg = JSON.parse(data.toString());
           
@@ -425,7 +426,7 @@ class CombinedDiscordAxonServer {
         }
       });
       
-      ws.on('error', (error) => {
+      ws.on('error', (error: Error) => {
         console.error('[Server] WebSocket error:', error);
       });
     });
@@ -1646,7 +1647,7 @@ class CombinedDiscordAxonServer {
       timestamp: Date.now()
     });
     
-    this.hotReloadWss.clients.forEach(client => {
+    this.hotReloadWss.clients.forEach((client: WebSocket) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(notification);
       }
@@ -1688,10 +1689,10 @@ class CombinedDiscordAxonServer {
 
     // Start hot reload WebSocket server
     const hotReloadPort = this.modulePort + 1;
-    this.hotReloadWss = new WebSocket.Server({ port: hotReloadPort });
+    this.hotReloadWss = new WebSocketServer({ port: hotReloadPort });
     console.log(`   Hot reload WebSocket on port ${hotReloadPort}`);
 
-    this.hotReloadWss.on('connection', (ws) => {
+    this.hotReloadWss.on('connection', (ws: WebSocket) => {
       console.log('[HotReload] Client connected');
 
       ws.on('close', () => {

@@ -11,8 +11,9 @@ import type {
   LLMProvider,
   LLMMessage,
   LLMOptions,
-  LLMResponse
-} from 'connectome-ts/dist/llm/llm-interface.js';
+  LLMResponse,
+  LLMStreamChunk
+} from 'connectome-ts';
 
 /**
  * Tool schema for Anthropic's native tool API
@@ -357,9 +358,9 @@ export class AnthropicToolProvider implements LLMProvider {
   }
 
   async *generateStream(
-    messages: import('connectome-ts').LLMMessage[],
-    options?: import('connectome-ts').LLMOptions
-  ): AsyncIterable<import('connectome-ts').LLMStreamChunk> {
+    messages: LLMMessage[],
+    options?: LLMOptions
+  ): AsyncIterable<LLMStreamChunk> {
     // ToolLoopAgent uses generate() for tool support, not streaming
     throw new Error('AnthropicToolProvider does not support streaming - use generate() instead');
   }

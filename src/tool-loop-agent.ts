@@ -11,9 +11,7 @@
  */
 
 import { BasicAgent, VEILStateManager } from 'connectome-ts';
-import type { AgentConfig } from 'connectome-ts/dist/agent/types.js';
-import type { Frame, StreamRef, VEILState, Facet, OutgoingVEILOperation, createDefaultTransition } from 'connectome-ts/dist/veil/types.js';
-import type { RenderedContext } from 'connectome-ts/dist/hud/types-v2.js';
+import type { AgentConfig, Frame, StreamRef, VEILState, Facet, OutgoingVEILOperation, createDefaultTransition, RenderedContext } from 'connectome-ts';
 import { AnthropicToolProvider, ToolSchema, ToolLLMResponse, ToolLLMOptions } from './anthropic-tool-provider.js';
 import { BedrockProvider } from './bedrock-provider.js';
 import axios from 'axios';

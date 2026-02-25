@@ -1,33 +1,19 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "commonjs",
-    "lib": ["ES2022"],
+    "composite": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },
-  "ts-node": {
-    "swc": true,
-    "compilerOptions": {
-      "module": "commonjs"
-    }
-  },
-  "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/unused",
-    "src/grpc/old"
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/unused", "src/grpc/old"],
+  "references": [
+    { "path": "../connectome-agent-core" },
+    { "path": "../connectome-axon-interfaces" },
+    { "path": "../axon-server" },
+    { "path": "../connectome-grpc-common" },
+    { "path": "../connectome-ts" }
   ]
 }

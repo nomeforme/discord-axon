@@ -51,6 +51,7 @@
       "max_tokens": 1024,
       "tools": ["fetch"],
       "mcp": ["everything"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": [],
       "skill_paths": [
