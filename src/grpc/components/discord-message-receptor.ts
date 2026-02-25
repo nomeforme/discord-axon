@@ -74,9 +74,13 @@ export class DiscordMessageReceptor {
     // Skip messages from THIS bot only
     if (message.author.id === this.bot.userId) return;
 
+    // Detect DM vs guild message
+    const isDM = message.channel.isDMBased();
+
     // Skip messages that start with '.' prefix (user opted out of storage/response)
+    // DMs skip this check — every message is processed (matches signal-axon behavior)
     const contentWithoutMentions = message.content.trim().replace(/^(<@[!&]?\d+>\s*)+/g, '').trim();
-    if (contentWithoutMentions.startsWith('.')) {
+    if (!isDM && contentWithoutMentions.startsWith('.')) {
       console.log(`[DiscordMessageReceptor:${botName}] Message starts with '.', skipping storage and response`);
       return;
     }
@@ -303,6 +307,11 @@ export class DiscordMessageReceptor {
       shouldActivate = true;
       activationReason = 'reply';
       console.log(`[DiscordMessageReceptor:${botName}] Message ${message.id.substring(0, 8)}... is reply to me, will activate`);
+    } else if (isDM) {
+      // DMs always activate — no mention required (matches signal-axon behavior)
+      shouldActivate = true;
+      activationReason = 'dm';
+      console.log(`[DiscordMessageReceptor:${botName}] DM from ${message.author.username}, will activate`);
     } else if (anyBotMentioned || replyToBotName) {
       // Another bot was targeted (mentioned or replied to), don't activate
     } else {
