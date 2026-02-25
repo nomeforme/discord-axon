@@ -31,6 +31,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -41,6 +42,7 @@
       "max_tokens": 1024,
       "tools": ["fetch"],
       "mcp": ["everything"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -71,6 +73,7 @@
       "max_tokens": 1024,
       "tools": [],
       "skip_identity_prompt": false,
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -80,6 +83,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -89,6 +93,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -99,6 +104,7 @@
       "max_tokens": 1024,
       "prompt_caching": false,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -109,6 +115,7 @@
       "max_tokens": 1024,
       "prompt_caching": false,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -119,6 +126,7 @@
       "max_tokens": 1024,
       "prompt_caching": false,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -128,6 +136,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -137,6 +146,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -147,6 +157,7 @@
       "max_tokens": 1024,
       "prompt_caching": false,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -156,6 +167,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -166,6 +178,7 @@
       "max_tokens": 1024,
       "prompt_caching": false,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     },
@@ -175,6 +188,7 @@
       "prompt": "Standard",
       "max_tokens": 1024,
       "tools": ["fetch"],
+      "remote": true,
       "guild_id": null,
       "auto_join_channels": []
     }
