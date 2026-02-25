@@ -7,7 +7,7 @@
  * Architecture mapping:
  * - Receptors: Handle Discord events, emit to Connectome server
  * - Transforms: Fetch/render context from server
- * - Effectors: Run agents, send responses to Discord
+ * - Effectors: Handle commands, deliver speech to Discord
  */
 
 // Receptors - Handle Discord events
@@ -27,10 +27,7 @@ export type { DiscordReactionReceptorConfig } from './discord-reaction-receptor.
 export { FocusedContextTransform } from './focused-context-transform.js';
 export type { FocusedContextTransformConfig, RenderedContext } from './focused-context-transform.js';
 
-// Effectors - Run agents and send responses
-export { DiscordAgentEffector } from './discord-agent-effector.js';
-export type { DiscordAgentEffectorConfig, AgentActivation } from './discord-agent-effector.js';
-
+// Effectors - Send responses
 export { DiscordCommandEffector } from './discord-command-effector.js';
 export type { ConfigUpdateCallback } from './discord-command-effector.js';
 

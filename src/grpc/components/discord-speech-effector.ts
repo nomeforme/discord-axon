@@ -6,8 +6,8 @@
  * - Speech facets → Discord messages
  * - Action facets → Discord reactions, embeds, etc.
  *
- * This handles server-initiated output (vs DiscordAgentEffector which
- * handles client-side agent execution).
+ * This handles server-initiated output — all bots are remote, so all
+ * speech arrives through this effector.
  */
 
 import type { Client, Guild, TextChannel } from 'discord.js';
@@ -90,7 +90,7 @@ export class DiscordSpeechEffector {
     const isFromOurBot = this.allBotNames.includes(speakerName) || this.allBotNames.includes(facet.agentId || '') || this.allBotNames.includes(facet.agentName || '');
     const isRemote = this.remoteBotNames.includes(speakerName) || this.remoteBotNames.includes(facet.agentId || '') || this.remoteBotNames.includes(facet.agentName || '');
 
-    // Skip speech from LOCAL bots (they send directly to Discord via DiscordAgentEffector)
+    // Skip speech from local bots (defensive — all bots are now remote)
     if (isFromOurBot && !isRemote) {
       return;
     }

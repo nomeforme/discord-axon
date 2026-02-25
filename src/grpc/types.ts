@@ -5,7 +5,6 @@
 import type { Client } from 'discord.js';
 import type { DiscordGrpcClient } from './client.js';
 import type { StreamManager } from './stream-manager.js';
-import type { ConnectomeAgent } from '@connectome/agent-core';
 import type { MCPServerConfig } from '@connectome/grpc-common';
 
 /**
@@ -75,7 +74,6 @@ export interface BotInstance {
   grpcClient: DiscordGrpcClient;
   streamManager: StreamManager;
   userId?: string;
-  agent?: ConnectomeAgent;
   /** Active typing intervals for remote bot activations, keyed by streamId */
   activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
 }

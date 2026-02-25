@@ -21,13 +21,11 @@ const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB 
 import { messageDeduplicator } from '../../message-deduplicator.js';
 import { getUserNameCache, getUserIdToNameCache } from '../utils/mention-resolver.js';
 import type { BotInstance, SharedState, RuntimeConfig } from '../types.js';
-import type { DiscordAgentEffector } from './discord-agent-effector.js';
 import type { DiscordCommandEffector } from './discord-command-effector.js';
 
 export interface DiscordMessageReceptorConfig {
   bot: BotInstance;
   state: SharedState;
-  agentEffector?: DiscordAgentEffector;
   commandEffector: DiscordCommandEffector;
   updateConfig: (updates: Partial<RuntimeConfig>) => void;
 }
@@ -40,7 +38,6 @@ export interface DiscordMessageReceptorConfig {
 export class DiscordMessageReceptor {
   private bot: BotInstance;
   private state: SharedState;
-  private agentEffector?: DiscordAgentEffector;
   private commandEffector: DiscordCommandEffector;
   private updateConfig: (updates: Partial<RuntimeConfig>) => void;
   private userNameCache: Map<string, string>;
@@ -49,7 +46,6 @@ export class DiscordMessageReceptor {
   constructor(config: DiscordMessageReceptorConfig) {
     this.bot = config.bot;
     this.state = config.state;
-    this.agentEffector = config.agentEffector;
     this.commandEffector = config.commandEffector;
     this.updateConfig = config.updateConfig;
     this.userNameCache = getUserNameCache();
@@ -357,52 +353,42 @@ export class DiscordMessageReceptor {
     // Attachments flow through server context (single source of truth pattern)
     // ========================================================================
     try {
-      if (this.agentEffector) {
-        // Local bot — run agent in-process
-        await this.agentEffector.runAgentCycle({
-          streamId,
-          channelId: message.channel.id,
-          messageContent: message.content,
-          authorName: message.author.displayName || message.author.username
-        });
-      } else {
-        // Remote bot — ensure this bot's stream manager is subscribed so its
-        // speech effector receives the reply (the emit lottery winner may be a different bot)
-        const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
-        await this.bot.streamManager.getOrCreateStream(
-          message.channel.id,
-          {
-            channelName,
-            channelType: message.channel.isDMBased() ? 'dm' : 'text',
-            guildId: message.guild?.id ?? undefined,
-            guildName: message.guild?.name ?? undefined
-          }
-        );
-
-        // Send typing indicator, refresh every 8s (Discord typing expires after 10s)
-        // Cleared by speech effector on delivery, or auto-clears after 120s as safety net.
-        if ('sendTyping' in message.channel) {
-          const ch = message.channel;
-          ch.sendTyping().catch(() => {});
-          const typingInterval = setInterval(() => {
-            ch.sendTyping().catch(() => {
-              clearInterval(typingInterval);
-              this.bot.activeTypingIntervals?.delete(streamId);
-            });
-          }, 8000);
-          setTimeout(() => { clearInterval(typingInterval); this.bot.activeTypingIntervals?.delete(streamId); }, 120000);
-          this.bot.activeTypingIntervals?.set(streamId, typingInterval);
+      // Ensure this bot's stream manager is subscribed so its
+      // speech effector receives the reply (the emit lottery winner may be a different bot)
+      const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
+      await this.bot.streamManager.getOrCreateStream(
+        message.channel.id,
+        {
+          channelName,
+          channelType: message.channel.isDMBased() ? 'dm' : 'text',
+          guildId: message.guild?.id ?? undefined,
+          guildName: message.guild?.name ?? undefined
         }
+      );
 
-        await this.bot.grpcClient.activateAgent(streamId, activationReason, {
-          channelId: message.channel.id,
-          messageContent: message.content,
-          authorName: message.author.displayName || message.author.username,
-          streamType: 'discord',
-          targetBot: botName
-        });
-        console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
+      // Send typing indicator, refresh every 8s (Discord typing expires after 10s)
+      // Cleared by speech effector on delivery, or auto-clears after 120s as safety net.
+      if ('sendTyping' in message.channel) {
+        const ch = message.channel;
+        ch.sendTyping().catch(() => {});
+        const typingInterval = setInterval(() => {
+          ch.sendTyping().catch(() => {
+            clearInterval(typingInterval);
+            this.bot.activeTypingIntervals?.delete(streamId);
+          });
+        }, 8000);
+        setTimeout(() => { clearInterval(typingInterval); this.bot.activeTypingIntervals?.delete(streamId); }, 120000);
+        this.bot.activeTypingIntervals?.set(streamId, typingInterval);
       }
+
+      await this.bot.grpcClient.activateAgent(streamId, activationReason, {
+        channelId: message.channel.id,
+        messageContent: message.content,
+        authorName: message.author.displayName || message.author.username,
+        streamType: 'discord',
+        targetBot: botName
+      });
+      console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {
       console.error(`[DiscordMessageReceptor:${botName}] Error triggering agent:`, error.message);
     }

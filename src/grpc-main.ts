@@ -27,7 +27,6 @@ import {
   DiscordInteractionReceptor,
   DiscordReactionReceptor,
   FocusedContextTransform,
-  DiscordAgentEffector,
   DiscordCommandEffector,
   DiscordSpeechEffector,
   // Types
@@ -35,7 +34,6 @@ import {
   type RuntimeConfig,
   type BotInstance
 } from './grpc/index.js';
-import { MCPManager } from '@connectome/grpc-common';
 
 /**
  * Main entry point
@@ -66,20 +64,6 @@ async function main(): Promise<void> {
   }
 
   console.log();
-
-  // Initialize MCP servers (global pool)
-  const mcpManager = new MCPManager();
-  const mcpServers = (config as any).mcp_servers || [];
-
-  if (mcpServers.length > 0) {
-    console.log(`Connecting to ${mcpServers.length} MCP server(s)...`);
-    await mcpManager.connectAll(mcpServers);
-    const connectedServers = mcpManager.getConnectedServers();
-    console.log(`  Connected: ${connectedServers.join(', ') || '(none)'}`);
-    const allTools = mcpManager.getAllToolHandlers();
-    console.log(`  Total MCP tools available: ${allTools.length}`);
-    console.log();
-  }
 
   console.log(`Initializing ${pairedBots.length} bot(s)...`);
   console.log();
@@ -120,8 +104,8 @@ async function main(): Promise<void> {
   for (const botConfig of pairedBots) {
     console.log(`Initializing ${botConfig.name}...`);
 
-    // Create bot instance (with MCP manager for tool access)
-    const bot = createBotInstance(botConfig, host, port, guildId, mcpManager);
+    // Create bot instance
+    const bot = createBotInstance(botConfig, host, port, guildId);
     state.bots.set(botConfig.name, bot);
 
     // Create components following Connectome nomenclature
@@ -153,43 +137,27 @@ async function main(): Promise<void> {
     // 2. DiscordCommandEffector - handles ! commands
     const commandEffector = new DiscordCommandEffector(botConfig.name);
 
-    // 3. DiscordAgentEffector - runs agent and sends responses (local bots only)
-    let agentEffector: DiscordAgentEffector | undefined;
-    if (bot.agent) {
-      agentEffector = new DiscordAgentEffector({
-        agent: bot.agent,
-        botConfig: bot.config,
-        grpcClient: bot.grpcClient,
-        discordClient: bot.discord,
-        contextTransform,
-        botUserIdToName: state.botUserIdToName,
-        maxMessageLength: config.max_message_length
-      });
-    }
-
-    // 4. DiscordReadyReceptor - handles Discord ready event
+    // 3. DiscordReadyReceptor - handles Discord ready event
     const readyReceptor = new DiscordReadyReceptor({
       bot,
       state
     });
     readyReceptor.setup();
 
-    // 5. DiscordMessageReceptor - handles Discord messages
-    //    Always created: remote bots still need emission + gRPC activation
+    // 4. DiscordMessageReceptor - handles Discord messages
     const messageReceptor = new DiscordMessageReceptor({
       bot,
       state,
-      agentEffector,   // undefined for remote bots — triggers gRPC activation path
       commandEffector,
       updateConfig: updateRuntimeConfig
     });
     messageReceptor.setup();
 
-    // 6. DiscordInteractionReceptor - handles slash commands, buttons
+    // 5. DiscordInteractionReceptor - handles slash commands, buttons
     const interactionReceptor = new DiscordInteractionReceptor({ bot });
     interactionReceptor.setup();
 
-    // 7. DiscordReactionReceptor - handles reactions
+    // 6. DiscordReactionReceptor - handles reactions
     const reactionReceptor = new DiscordReactionReceptor({ bot, state });
     reactionReceptor.setup();
 
@@ -199,12 +167,6 @@ async function main(): Promise<void> {
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
-
-    // Disconnect MCP servers
-    if (mcpManager.getConnectedServers().length > 0) {
-      console.log('  Disconnecting MCP servers...');
-      await mcpManager.disconnectAll();
-    }
 
     for (const [botName, bot] of state.bots) {
       console.log(`  Disconnecting ${botName}...`);
@@ -233,7 +195,6 @@ async function main(): Promise<void> {
       await bot.discord.login(bot.config.token);
       console.log(`  ${botName}: Logged in to Discord`);
 
-      // Agent execution happens in DiscordAgentEffector (client-side)
       console.log(`  ${botName}: Ready for messages`);
     } catch (error: any) {
       console.error(`  ${botName}: Failed to connect: ${error.message}`);
