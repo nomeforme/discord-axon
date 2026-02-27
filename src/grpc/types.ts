@@ -5,40 +5,23 @@
 import type { Client } from 'discord.js';
 import type { DiscordGrpcClient } from './client.js';
 import type { StreamManager } from './stream-manager.js';
-import type { MCPServerConfig } from '@connectome/grpc-common';
 
 /**
  * Bot configuration from config.json
+ *
+ * All cognition fields (model, tools, mcp, skills, rlm, etc.) live in
+ * bot-runtime/config.json. The axon only needs identity + platform binding.
  */
 export interface BotConfig {
   name: string;
   token?: string;
-  model?: string;
   prompt?: string;
-  /** Skip the platform identity text in system prompt (bot gets only the custom prompt, or nothing if prompt is "Standard") */
+  /** Skip the platform identity text in system prompt */
   skip_identity_prompt?: boolean;
-  max_tokens?: number;
-  tools?: string[];
-  /** List of MCP server names this bot should use */
-  mcp?: string[];
-  /** Enable prompt caching (default true). Set false for bedrock cross-region models. */
-  prompt_caching?: boolean;
   guild_id?: string | null;
   auto_join_channels?: string[];
-  /** Paths to skill directories to load */
-  skill_paths?: string[];
-  /** Remote mode: discord-axon keeps Discord connection but delegates cognition to external bot-runtime */
+  /** Remote mode: cognition delegated to bot-runtime (all bots are remote) */
   remote?: boolean;
-  /** RLM (recursive sub-agent) configuration */
-  rlm?: {
-    maxDepth?: number;
-    maxCalls?: number;
-    budget?: number;
-    timeoutSeconds?: number;
-    model?: string;
-    childModel?: string;
-    cwd?: string;
-  };
 }
 
 /**
@@ -47,8 +30,6 @@ export interface BotConfig {
 export interface DiscordConfig {
   active_bots: string[];
   bots: BotConfig[];
-  /** Global MCP server configurations */
-  mcp_servers?: MCPServerConfig[];
   max_conversation_frames?: number;
   max_bot_mentions_per_conversation?: number;
   random_reply_chance?: number;

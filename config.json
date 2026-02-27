@@ -1,12 +1,4 @@
 {
-  "mcp_servers": [
-    {
-      "name": "everything",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"]
-    }
-  ],
   "active_bots": [
     "claude-sonnet-4-5",
     "claude-opus-4-5",
@@ -25,173 +17,21 @@
     "claude-sonnet-4-6"
   ],
   "bots": [
-    {
-      "name": "claude-sonnet-4-5",
-      "model": "claude-sonnet-4-5-20250929",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-opus-4-5",
-      "model": "claude-opus-4-5-20251101",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "mcp": ["everything"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-opus-4-6",
-      "model": "claude-opus-4-6",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "mcp": ["everything"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": [],
-      "skill_paths": [
-        "/workspace/skills/connectome-ontology",
-        "/workspace/pi-skills/brave-search"
-      ],
-      "rlm": {
-        "maxDepth": 2,
-        "maxCalls": 10,
-        "timeoutSeconds": 300
-      }
-    },
-    {
-      "name": "claude-3-opus",
-      "model": "claude-3-opus-20240229",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": [],
-      "skip_identity_prompt": false,
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-opus-4",
-      "model": "claude-opus-4-20250514",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-haiku-4-5",
-      "model": "claude-haiku-4-5-20251001",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-sonnet",
-      "model": "us.anthropic.claude-3-sonnet-20240229-v1:0",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-5-sonnet",
-      "model": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-6-sonnet",
-      "model": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-sonnet-4",
-      "model": "claude-sonnet-4-20250514",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-opus-4-1",
-      "model": "claude-opus-4-1-20250805",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-5-haiku",
-      "model": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-haiku",
-      "model": "claude-3-haiku-20240307",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-3-7-sonnet",
-      "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "prompt_caching": false,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    },
-    {
-      "name": "claude-sonnet-4-6",
-      "model": "claude-sonnet-4-6",
-      "prompt": "Standard",
-      "max_tokens": 1024,
-      "tools": ["fetch"],
-      "remote": true,
-      "guild_id": null,
-      "auto_join_channels": []
-    }
+    { "name": "claude-sonnet-4-5", "remote": true },
+    { "name": "claude-opus-4-5", "remote": true },
+    { "name": "claude-opus-4-6", "remote": true },
+    { "name": "claude-3-opus", "remote": true, "skip_identity_prompt": false },
+    { "name": "claude-opus-4", "remote": true },
+    { "name": "claude-haiku-4-5", "remote": true },
+    { "name": "claude-3-sonnet", "remote": true },
+    { "name": "claude-3-5-sonnet", "remote": true },
+    { "name": "claude-3-6-sonnet", "remote": true },
+    { "name": "claude-sonnet-4", "remote": true },
+    { "name": "claude-opus-4-1", "remote": true },
+    { "name": "claude-3-5-haiku", "remote": true },
+    { "name": "claude-3-haiku", "remote": true },
+    { "name": "claude-3-7-sonnet", "remote": true },
+    { "name": "claude-sonnet-4-6", "remote": true }
   ],
   "max_conversation_frames": 100,
   "max_bot_mentions_per_conversation": 1,
