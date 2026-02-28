@@ -74,8 +74,13 @@ export class DiscordMessageReceptor {
     // Skip messages from THIS bot only
     if (message.author.id === this.bot.userId) return;
 
-    // Detect DM vs guild message
+    // Detect DM vs guild message vs thread
     const isDM = message.channel.isDMBased();
+    const isThread = 'isThread' in message.channel && typeof message.channel.isThread === 'function' && message.channel.isThread();
+    if (isThread) {
+      const parentChannelId = 'parentId' in message.channel ? message.channel.parentId : null;
+      console.log(`[DiscordMessageReceptor:${botName}] Thread detected: channel=${message.channel.id} parentChannel=${parentChannelId} guild=${message.guild?.id}`);
+    }
 
     // Skip messages that start with '.' prefix (user opted out of storage/response)
     // DMs skip this check — every message is processed (matches signal-axon behavior)
@@ -215,14 +220,22 @@ export class DiscordMessageReceptor {
       try {
         const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
 
+        // Determine channel type and parent stream for threads
+        const channelType = isDM ? 'dm' : isThread ? 'thread' : 'text';
+        let parentStreamId: string | undefined;
+        if (isThread && message.guild?.id && 'parentId' in message.channel && message.channel.parentId) {
+          parentStreamId = `discord:${message.guild.id}:${message.channel.parentId}`;
+        }
+
         // Ensure stream exists on server
         await this.bot.streamManager.getOrCreateStream(
           message.channel.id,
           {
             channelName,
-            channelType: message.channel.isDMBased() ? 'dm' : 'text',
+            channelType: channelType as 'text' | 'voice' | 'dm' | 'thread',
             guildId: message.guild?.id ?? undefined,
-            guildName: message.guild?.name ?? undefined
+            guildName: message.guild?.name ?? undefined,
+            parentStreamId,
           }
         );
 
@@ -364,14 +377,20 @@ export class DiscordMessageReceptor {
     try {
       // Ensure this bot's stream manager is subscribed so its
       // speech effector receives the reply (the emit lottery winner may be a different bot)
-      const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
+      const channelName2 = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
+      const channelType2 = isDM ? 'dm' : isThread ? 'thread' : 'text';
+      let parentStreamId2: string | undefined;
+      if (isThread && message.guild?.id && 'parentId' in message.channel && message.channel.parentId) {
+        parentStreamId2 = `discord:${message.guild.id}:${message.channel.parentId}`;
+      }
       await this.bot.streamManager.getOrCreateStream(
         message.channel.id,
         {
-          channelName,
-          channelType: message.channel.isDMBased() ? 'dm' : 'text',
+          channelName: channelName2,
+          channelType: channelType2 as 'text' | 'voice' | 'dm' | 'thread',
           guildId: message.guild?.id ?? undefined,
-          guildName: message.guild?.name ?? undefined
+          guildName: message.guild?.name ?? undefined,
+          parentStreamId: parentStreamId2,
         }
       );
 

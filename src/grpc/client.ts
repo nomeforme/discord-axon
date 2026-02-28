@@ -443,6 +443,7 @@ export class DiscordGrpcClient extends EventEmitter {
       guildId?: string;
       guildName?: string;
       channelType?: string;
+      parentStreamId?: string;
     }
   ): Promise<string> {
     const streamId = metadata?.guildId
@@ -455,7 +456,7 @@ export class DiscordGrpcClient extends EventEmitter {
       channelType: metadata?.channelType || 'text',
       guildId: metadata?.guildId || '',
       guildName: metadata?.guildName || ''
-    });
+    }, metadata?.parentStreamId);
 
     return streamId;
   }

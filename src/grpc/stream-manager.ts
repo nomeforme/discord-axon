@@ -59,6 +59,7 @@ export class StreamManager extends EventEmitter {
       channelType?: 'text' | 'voice' | 'dm' | 'thread';
       guildId?: string;
       guildName?: string;
+      parentStreamId?: string;
     }
   ): Promise<StreamInfo> {
     const streamId = this.buildStreamId(channelId, metadata.guildId);
@@ -66,6 +67,11 @@ export class StreamManager extends EventEmitter {
     // Check if stream already exists locally
     let info = this.streams.get(streamId);
     if (info) {
+      // If parent linkage is provided, ensure the server knows about it
+      // (stream may have been created before hierarchy support was deployed)
+      if (metadata.parentStreamId) {
+        this.client.ensureStream(channelId, metadata).catch(() => {});
+      }
       // Update last message time
       info.lastMessageAt = Date.now();
       return info;
