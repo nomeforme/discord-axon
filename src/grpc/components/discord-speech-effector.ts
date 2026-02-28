@@ -105,7 +105,7 @@ export class DiscordSpeechEffector {
     try {
       // Clean speech content (strip XML tags, extract tool syntax)
       let cleanedContent = cleanSpeechContent(facet.content || '');
-      if (!cleanedContent) return;
+      if (!cleanedContent && !facet.attachments?.length) return;
 
       const channel = await this.discordClient.channels.fetch(streamInfo.channelId);
       if (channel && 'send' in channel) {
@@ -114,12 +114,32 @@ export class DiscordSpeechEffector {
           cleanedContent = await resolveMentions(cleanedContent, (channel as TextChannel).guild, this.botUserIdToName);
         }
 
-        // Split if too long
-        const chunks = splitMessage(cleanedContent, this.maxMessageLength);
-        for (const chunk of chunks) {
-          await channel.send(chunk);
+        // Build file attachments from facet
+        const files: Array<{ attachment: Buffer; name: string }> = [];
+        if (facet.attachments?.length) {
+          for (const att of facet.attachments) {
+            const buffer = att.data instanceof Uint8Array
+              ? Buffer.from(att.data)
+              : Buffer.from(att.data, 'base64');
+            files.push({ attachment: buffer, name: att.filename || 'attachment' });
+          }
         }
-        console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length} chunk(s)`);
+
+        // Split if too long — attach files to first chunk only
+        const chunks = cleanedContent ? splitMessage(cleanedContent, this.maxMessageLength) : [];
+        if (chunks.length === 0 && files.length > 0) {
+          // Attachment-only message (no text)
+          await channel.send({ files });
+        } else {
+          for (let i = 0; i < chunks.length; i++) {
+            if (i === 0 && files.length > 0) {
+              await channel.send({ content: chunks[i], files });
+            } else {
+              await channel.send(chunks[i]);
+            }
+          }
+        }
+        console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length || (files.length > 0 ? 1 : 0)} chunk(s)${files.length > 0 ? ` with ${files.length} attachment(s)` : ''}`);
 
         // Clear typing indicator for this stream
         const typingInterval = this.activeTypingIntervals?.get(streamInfo.streamId);
