@@ -14,6 +14,9 @@
 import { config as loadEnv } from 'dotenv';
 loadEnv();
 
+import { initErrorTracking, Sentry } from '@connectome/grpc-common';
+initErrorTracking({ serviceName: 'discord-axon' });
+
 import {
   // Configuration
   loadConfig,
@@ -175,6 +178,7 @@ async function main(): Promise<void> {
       bot.discord.destroy();
     }
 
+    await Sentry.flush(2000);
     console.log('Shutdown complete');
     process.exit(0);
   };
