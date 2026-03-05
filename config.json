@@ -14,7 +14,8 @@
     "claude-3-5-haiku",
     "claude-3-haiku",
     "claude-3-7-sonnet",
-    "claude-sonnet-4-6"
+    "claude-sonnet-4-6",
+    "ari"
   ],
   "bots": [
     { "name": "claude-sonnet-4-5", "remote": true },
@@ -31,7 +32,8 @@
     { "name": "claude-3-5-haiku", "remote": true },
     { "name": "claude-3-haiku", "remote": true },
     { "name": "claude-3-7-sonnet", "remote": true },
-    { "name": "claude-sonnet-4-6", "remote": true }
+    { "name": "claude-sonnet-4-6", "remote": true },
+    { "name": "ari", "remote": true, "skip_identity_prompt": true }
   ],
   "max_conversation_frames": 100,
   "max_bot_mentions_per_conversation": 1,
