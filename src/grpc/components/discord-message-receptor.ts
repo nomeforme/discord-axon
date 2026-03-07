@@ -11,7 +11,7 @@
  * since it runs in the client, not the server's Space.
  */
 
-import type { Message, Attachment } from 'discord.js';
+import type { Message, Attachment, PartialMessage } from 'discord.js';
 import sharp from 'sharp';
 
 // Image compression settings (match signal-axon)
@@ -62,7 +62,15 @@ export class DiscordMessageReceptor {
       await this.handleMessage(message);
     });
 
-    console.log(`[DiscordMessageReceptor:${botName}] Message handler registered`);
+    this.bot.discord.on('messageUpdate', async (oldMessage: Message | PartialMessage, newMessage: Message | PartialMessage) => {
+      await this.handleMessageUpdate(oldMessage, newMessage);
+    });
+
+    this.bot.discord.on('messageDelete', async (message: Message | PartialMessage) => {
+      await this.handleMessageDelete(message);
+    });
+
+    console.log(`[DiscordMessageReceptor:${botName}] Message/update/delete handlers registered`);
   }
 
   /**
@@ -430,6 +438,75 @@ export class DiscordMessageReceptor {
       console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {
       console.error(`[DiscordMessageReceptor:${botName}] Error triggering agent:`, error.message);
+    }
+  }
+
+  /**
+   * Handle a Discord message edit — update the VEIL facet
+   */
+  private async handleMessageUpdate(
+    oldMessage: Message | PartialMessage,
+    newMessage: Message | PartialMessage
+  ): Promise<void> {
+    const botName = this.bot.config.name;
+
+    // Skip edits from THIS bot
+    if (newMessage.author?.id === this.bot.userId) return;
+
+    // Skip if content didn't change (e.g. embed-only updates)
+    if (oldMessage.content === newMessage.content) return;
+
+    // Only one bot should emit the update (dedup)
+    if (!messageDeduplicator.shouldEmit(`edit-${newMessage.id}`, botName)) return;
+
+    // Fetch full message if partial
+    let message = newMessage;
+    if (newMessage.partial) {
+      try {
+        message = await newMessage.fetch();
+      } catch {
+        console.log(`[DiscordMessageReceptor:${botName}] Could not fetch partial updated message ${newMessage.id}`);
+        return;
+      }
+    }
+
+    try {
+      await this.bot.grpcClient.emitDiscordMessageUpdate({
+        messageId: message.id,
+        content: message.content || '',
+        authorId: message.author?.id || '',
+        authorName: message.author?.displayName || message.author?.username || 'unknown',
+        channelId: message.channelId,
+        guildId: message.guildId ?? undefined,
+        editedTimestamp: message.editedTimestamp || Date.now(),
+      });
+      console.log(`[DiscordMessageReceptor:${botName}] Emitted messageUpdate for ${message.id}: ${(message.content || '').substring(0, 50)}...`);
+    } catch (error: any) {
+      console.error(`[DiscordMessageReceptor:${botName}] Error emitting messageUpdate:`, error.message);
+    }
+  }
+
+  /**
+   * Handle a Discord message deletion — remove the VEIL facet
+   */
+  private async handleMessageDelete(message: Message | PartialMessage): Promise<void> {
+    const botName = this.bot.config.name;
+
+    // Skip deletions from THIS bot
+    if (message.author?.id === this.bot.userId) return;
+
+    // Only one bot should emit the delete (dedup)
+    if (!messageDeduplicator.shouldEmit(`delete-${message.id}`, botName)) return;
+
+    try {
+      await this.bot.grpcClient.emitDiscordMessageDelete({
+        messageId: message.id,
+        channelId: message.channelId,
+        guildId: message.guildId ?? undefined,
+      });
+      console.log(`[DiscordMessageReceptor:${botName}] Emitted messageDelete for ${message.id}`);
+    } catch (error: any) {
+      console.error(`[DiscordMessageReceptor:${botName}] Error emitting messageDelete:`, error.message);
     }
   }
 

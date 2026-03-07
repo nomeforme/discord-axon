@@ -167,6 +167,52 @@ export class DiscordGrpcClient extends EventEmitter {
   }
 
   /**
+   * Emit a Discord message update event (message was edited)
+   */
+  async emitDiscordMessageUpdate(update: {
+    messageId: string;
+    content: string;
+    authorId: string;
+    authorName: string;
+    channelId: string;
+    guildId?: string;
+    editedTimestamp: number;
+  }): Promise<{ success: boolean }> {
+    const streamId = update.guildId
+      ? `discord:${update.guildId}:${update.channelId}`
+      : `discord:dm:${update.channelId}`;
+
+    const result = await this.client.emitEvent(
+      'discord:messageUpdate',
+      { ...update, streamId, streamType: 'discord' },
+      { priority: 'high', waitForFrame: true }
+    );
+
+    return { success: result.success };
+  }
+
+  /**
+   * Emit a Discord message delete event
+   */
+  async emitDiscordMessageDelete(del: {
+    messageId: string;
+    channelId: string;
+    guildId?: string;
+  }): Promise<{ success: boolean }> {
+    const streamId = del.guildId
+      ? `discord:${del.guildId}:${del.channelId}`
+      : `discord:dm:${del.channelId}`;
+
+    const result = await this.client.emitEvent(
+      'discord:messageDelete',
+      { ...del, streamId, streamType: 'discord' },
+      { priority: 'high', waitForFrame: true }
+    );
+
+    return { success: result.success };
+  }
+
+  /**
    * Emit a Discord connected event (registers bot mapping on server)
    */
   async emitDiscordConnected(connected: {
