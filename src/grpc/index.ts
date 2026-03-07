@@ -10,10 +10,10 @@ export { StreamManager, type StreamInfo } from './stream-manager.js';
 export * from './types.js';
 
 // Configuration
-export { loadConfig, pairTokensWithBots, getGrpcConfig } from './config-loader.js';
+export { getTokens, getGrpcConfig, getOperationalConfig } from './config-loader.js';
 
 // Bot instance management
-export { createBotInstance } from './bot-instance.js';
+export { createDiscordClient, createBotInstance } from './bot-instance.js';
 
 // Components (class-based, Connectome nomenclature)
 export * from './components/index.js';

@@ -6,8 +6,8 @@
  * - Speech facets → Discord messages
  * - Action facets → Discord reactions, embeds, etc.
  *
- * This handles server-initiated output — all bots are remote, so all
- * speech arrives through this effector.
+ * Each managed bot delivers only its own speech. Unmanaged agents
+ * (exogenous bots) handle their own platform delivery.
  */
 
 import type { Client, Guild, TextChannel } from 'discord.js';
@@ -19,8 +19,8 @@ export interface DiscordSpeechEffectorConfig {
   botConfig: BotConfig;
   discordClient: Client;
   streamManager: StreamManager;
-  allBotNames: string[];
-  remoteBotNames: string[];
+  /** Set of bot names managed by this axon (discovered on login) */
+  managedBotNames: Set<string>;
   maxMessageLength?: number;
   botUserIdToName: Map<string, string>;
   activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
@@ -35,8 +35,7 @@ export class DiscordSpeechEffector {
   private botConfig: BotConfig;
   private discordClient: Client;
   private streamManager: StreamManager;
-  private allBotNames: string[];
-  private remoteBotNames: string[];
+  private managedBotNames: Set<string>;
   private maxMessageLength?: number;
   private botUserIdToName: Map<string, string>;
   private activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
@@ -45,8 +44,7 @@ export class DiscordSpeechEffector {
     this.botConfig = config.botConfig;
     this.discordClient = config.discordClient;
     this.streamManager = config.streamManager;
-    this.allBotNames = config.allBotNames;
-    this.remoteBotNames = config.remoteBotNames;
+    this.managedBotNames = config.managedBotNames;
     this.maxMessageLength = config.maxMessageLength;
     this.botUserIdToName = config.botUserIdToName;
     this.activeTypingIntervals = config.activeTypingIntervals;
@@ -72,8 +70,6 @@ export class DiscordSpeechEffector {
    * Set up speech handler (handles server-generated speech)
    */
   private setupSpeechHandler(): void {
-    const botName = this.botConfig.name;
-
     this.streamManager.onSpeech(async (facet, streamInfo) => {
       await this.handleSpeech(facet, streamInfo);
     });
@@ -81,26 +77,26 @@ export class DiscordSpeechEffector {
 
   /**
    * Handle speech facet from server
+   *
+   * Each managed bot delivers only its own speech.
+   * If the speaker is another managed bot, that bot's effector handles it.
+   * If the speaker is an unmanaged agent (exogenous), it has its own platform client.
    */
   private async handleSpeech(facet: any, streamInfo: StreamInfo): Promise<void> {
     const botName = this.botConfig.name;
 
     // Determine speaker identity
     const speakerName = facet.agentName || facet.agentId || '';
-    const isFromOurBot = this.allBotNames.includes(speakerName) || this.allBotNames.includes(facet.agentId || '') || this.allBotNames.includes(facet.agentName || '');
-    const isRemote = this.remoteBotNames.includes(speakerName) || this.remoteBotNames.includes(facet.agentId || '') || this.remoteBotNames.includes(facet.agentName || '');
 
-    // Skip speech from local bots (defensive — all bots are now remote)
-    if (isFromOurBot && !isRemote) {
+    // Only deliver speech that matches THIS bot's name (or agentName from binding)
+    const agentName = this.botConfig.agentName;
+    const isMyBot = speakerName === botName || facet.agentName === botName
+      || (agentName && (speakerName === agentName || facet.agentName === agentName));
+    if (!isMyBot) {
       return;
     }
 
-    // For remote bot speech, only THIS bot's effector should deliver (avoid duplicates from other bots)
-    if (isRemote && speakerName !== botName && facet.agentName !== botName) {
-      return;
-    }
-
-    console.log(`[DiscordSpeechEffector:${botName}] Sending message to ${streamInfo.channelName || streamInfo.channelId}${isRemote ? ` (remote bot: ${speakerName})` : ''}`);
+    console.log(`[DiscordSpeechEffector:${botName}] Sending message to ${streamInfo.channelName || streamInfo.channelId}`);
 
     try {
       // Clean speech content (strip XML tags, extract tool syntax)
@@ -109,7 +105,7 @@ export class DiscordSpeechEffector {
 
       const channel = await this.discordClient.channels.fetch(streamInfo.channelId);
       if (channel && 'send' in channel) {
-        // Resolve @mentions for remote bot speech
+        // Resolve @mentions for outgoing speech
         if ('guild' in channel) {
           cleanedContent = await resolveMentions(cleanedContent, (channel as TextChannel).guild, this.botUserIdToName);
         }
@@ -157,8 +153,6 @@ export class DiscordSpeechEffector {
    * Set up action handler
    */
   private setupActionHandler(): void {
-    const botName = this.botConfig.name;
-
     this.streamManager.onAction(async (facet, streamInfo) => {
       await this.handleAction(facet, streamInfo);
     });

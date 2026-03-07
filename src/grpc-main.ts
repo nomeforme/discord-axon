@@ -4,10 +4,10 @@
  * Connects multiple Discord bots to the Connectome gRPC server
  *
  * Architecture:
- * - Loads config.json for bot configurations
- * - Parses DISCORD_BOT_TOKENS (comma-separated) and pairs by index with active_bots
- * - Creates one Discord.js Client per bot
- * - Creates one gRPC client per bot
+ * - Tokens arrive via DISCORD_BOT_TOKENS env var (startup batch) and/or
+ *   AxonBindingServer advertisements from bot-runtimes (dynamic)
+ * - Each token is logged into Discord to discover bot identity (name, userId)
+ * - Creates one gRPC client per discovered bot
  * - Uses class-based components following Connectome nomenclature
  */
 
@@ -17,12 +17,16 @@ loadEnv();
 import { initErrorTracking, Sentry } from '@connectome/grpc-common';
 initErrorTracking({ serviceName: 'discord-axon' });
 
+import { AxonBindingServer } from '@connectome/axon-binding';
+import type { AxonBinding } from '@connectome/axon-binding';
+
 import {
   // Configuration
-  loadConfig,
-  pairTokensWithBots,
+  getTokens,
   getGrpcConfig,
+  getOperationalConfig,
   // Bot instance
+  createDiscordClient,
   createBotInstance,
   // Components
   DiscordReadyReceptor,
@@ -48,28 +52,22 @@ async function main(): Promise<void> {
   console.log('╚════════════════════════════════════════════════════════╝');
   console.log();
 
-  // Load configuration
-  const config = loadConfig();
+  // Load configuration from environment
+  const tokens = getTokens();
+  const operationalConfig = getOperationalConfig();
   const { host, port } = getGrpcConfig();
   const guildId = process.env.DISCORD_GUILD_ID;
+  const bindingPort = parseInt(process.env.AXON_BINDING_PORT || '0');
 
   console.log('Configuration:');
-  console.log(`  Connectome gRPC: ${host}:${port}`);
-  console.log(`  Guild ID:        ${guildId || '(all guilds)'}`);
+  console.log(`  Connectome gRPC:    ${host}:${port}`);
+  console.log(`  Guild ID:           ${guildId || '(all guilds)'}`);
+  console.log(`  Tokens (env):       ${tokens.length}`);
+  console.log(`  Axon binding:   ${bindingPort || 'disabled'}`);
   console.log();
 
-  // Pair tokens with bot configs
-  const pairedBots = pairTokensWithBots(config);
-
-  if (pairedBots.length === 0) {
-    console.error('Error: No bots configured with tokens');
-    process.exit(1);
-  }
-
-  console.log();
-
-  console.log(`Initializing ${pairedBots.length} bot(s)...`);
-  console.log();
+  // Build managed bot name set (for speech routing)
+  const managedBotNames = new Set<string>();
 
   // Initialize shared state
   const state: SharedState = {
@@ -78,12 +76,11 @@ async function main(): Promise<void> {
     processingActivations: new Set<string>(),
     botInteractionCounts: new Map<string, number>(),
     runtimeConfig: {
-      randomReplyChance: (config as any).random_reply_chance ?? 200,
-      maxBotMentionsPerConversation: (config as any).max_bot_mentions_per_conversation ?? 3,
-      maxConversationFrames: config.max_conversation_frames || 100,
-      maxMemoryFrames: 500
-    },
-    pairedBots
+      randomReplyChance: operationalConfig.randomReplyChance,
+      maxBotMentionsPerConversation: operationalConfig.maxBotMentionsPerConversation,
+      maxConversationFrames: operationalConfig.maxConversationFrames,
+      maxMemoryFrames: operationalConfig.maxMemoryFrames
+    }
   };
 
   // Track context transforms for runtime config updates
@@ -92,7 +89,6 @@ async function main(): Promise<void> {
   const updateRuntimeConfig = (updates: Partial<RuntimeConfig>) => {
     Object.assign(state.runtimeConfig, updates);
     console.log('[RuntimeConfig] Updated:', updates);
-    // Propagate mcf changes to all context transforms
     if (updates.maxConversationFrames !== undefined) {
       for (const ct of contextTransforms) {
         ct.setMaxConversationFrames(updates.maxConversationFrames);
@@ -100,76 +96,139 @@ async function main(): Promise<void> {
     }
   };
 
-  // Initialize each bot
-  const allBotNames = pairedBots.map(b => b.name);
-  const remoteBotNames = pairedBots.filter(b => b.remote).map(b => b.name);
+  // ========================================================================
+  // addBot — reusable: login a token, create components, connect gRPC
+  // Called both at startup (env tokens) and dynamically (binding ads)
+  // ========================================================================
+  async function addBot(token: string, source: string, agentName?: string): Promise<string | null> {
+    try {
+      const discord = createDiscordClient();
+      const readyPromise = new Promise<void>((resolve) => discord.once('ready', () => resolve()));
+      await discord.login(token);
+      await readyPromise;
 
-  for (const botConfig of pairedBots) {
-    console.log(`Initializing ${botConfig.name}...`);
+      const name = discord.user!.username;
+      const userId = discord.user!.id;
 
-    // Create bot instance
-    const bot = createBotInstance(botConfig, host, port, guildId);
-    state.bots.set(botConfig.name, bot);
+      // Skip if already managed
+      if (state.bots.has(name)) {
+        console.log(`  ${name}: Already managed, skipping (${source})`);
+        discord.destroy();
+        return name;
+      }
 
-    // Create components following Connectome nomenclature
+      console.log(`  Discovered: ${name} (${userId}) [${source}]${agentName ? ` agentName=${agentName}` : ''}`);
+      managedBotNames.add(name);
+      if (agentName) managedBotNames.add(agentName);
 
-    // 0. DiscordSpeechEffector - handles server-initiated speech/actions
-    const speechEffector = new DiscordSpeechEffector({
-      botConfig: bot.config,
-      discordClient: bot.discord,
-      streamManager: bot.streamManager,
-      allBotNames,
-      remoteBotNames,
-      maxMessageLength: config.max_message_length,
-      botUserIdToName: state.botUserIdToName,
-      activeTypingIntervals: bot.activeTypingIntervals
+      // Create bot instance from pre-logged-in Discord client
+      const bot = createBotInstance(discord, host, port, guildId);
+      if (agentName) bot.config.agentName = agentName;
+      state.bots.set(name, bot);
+      state.botUserIdToName.set(userId, name);
+
+      // Create components
+      const speechEffector = new DiscordSpeechEffector({
+        botConfig: bot.config,
+        discordClient: bot.discord,
+        streamManager: bot.streamManager,
+        managedBotNames,
+        maxMessageLength: operationalConfig.maxMessageLength,
+        botUserIdToName: state.botUserIdToName,
+        activeTypingIntervals: bot.activeTypingIntervals
+      });
+      speechEffector.setup();
+
+      const contextTransform = new FocusedContextTransform({
+        grpcClient: bot.grpcClient,
+        botName: name,
+        systemPrompt: 'Standard',
+        maxConversationFrames: state.runtimeConfig.maxConversationFrames,
+        botUserIdToName: state.botUserIdToName,
+      });
+      contextTransforms.push(contextTransform);
+
+      const commandEffector = new DiscordCommandEffector(name);
+
+      const readyReceptor = new DiscordReadyReceptor({ bot, state });
+      readyReceptor.setup();
+
+      const messageReceptor = new DiscordMessageReceptor({
+        bot, state, commandEffector, updateConfig: updateRuntimeConfig
+      });
+      messageReceptor.setup();
+
+      const interactionReceptor = new DiscordInteractionReceptor({ bot });
+      interactionReceptor.setup();
+
+      const reactionReceptor = new DiscordReactionReceptor({ bot, state });
+      reactionReceptor.setup();
+
+      // Connect gRPC
+      await bot.grpcClient.connect();
+      console.log(`  ${name}: Components initialized, gRPC connected [${source}]`);
+
+      return name;
+    } catch (error: any) {
+      console.error(`  Failed to add bot (${source}): ${error.message}`);
+      return null;
+    }
+  }
+
+  // ========================================================================
+  // Step 1: Start AxonBindingServer FIRST (so bot-runtimes can connect
+  // while env-based bots are still logging in)
+  // ========================================================================
+  let bindingServer: AxonBindingServer | undefined;
+
+  if (bindingPort > 0) {
+    bindingServer = new AxonBindingServer({ port: bindingPort });
+
+    bindingServer.on('binding:added', async (binding: AxonBinding) => {
+      if (binding.platform !== 'discord') {
+        console.log(`[AxonBinding] Ignoring non-discord binding: ${binding.agentName} → ${binding.platform}`);
+        return;
+      }
+
+      const token = binding.credentials.token;
+      if (!token) {
+        console.error(`[AxonBinding] Discord binding for ${binding.agentName} missing token`);
+        return;
+      }
+
+      console.log(`[AxonBinding] Adding bot ${binding.agentName}...`);
+      await addBot(token, `binding:${binding.agentName}`, binding.agentName);
     });
-    speechEffector.setup();
 
-    // 1. FocusedContextTransform - fetches and renders context from server
-    const contextTransform = new FocusedContextTransform({
-      grpcClient: bot.grpcClient,
-      botName: botConfig.name,
-      systemPrompt: botConfig.prompt || 'Standard',
-      maxConversationFrames: state.runtimeConfig.maxConversationFrames,
-      botUserIdToName: state.botUserIdToName,
-      skipIdentityPrompt: botConfig.skip_identity_prompt,
-    });
-    contextTransforms.push(contextTransform);
+    await bindingServer.start();
+  }
 
-    // 2. DiscordCommandEffector - handles ! commands
-    const commandEffector = new DiscordCommandEffector(botConfig.name);
+  // ========================================================================
+  // Step 2: Login bots from DISCORD_BOT_TOKENS env var (startup batch)
+  // ========================================================================
+  if (tokens.length > 0) {
+    console.log(`Logging in ${tokens.length} bot(s) from env...`);
 
-    // 3. DiscordReadyReceptor - handles Discord ready event
-    const readyReceptor = new DiscordReadyReceptor({
-      bot,
-      state
-    });
-    readyReceptor.setup();
+    for (const token of tokens) {
+      await addBot(token, 'env');
+    }
 
-    // 4. DiscordMessageReceptor - handles Discord messages
-    const messageReceptor = new DiscordMessageReceptor({
-      bot,
-      state,
-      commandEffector,
-      updateConfig: updateRuntimeConfig
-    });
-    messageReceptor.setup();
+    console.log(`  ${state.bots.size} bot(s) initialized from env`);
+    console.log();
+  }
 
-    // 5. DiscordInteractionReceptor - handles slash commands, buttons
-    const interactionReceptor = new DiscordInteractionReceptor({ bot });
-    interactionReceptor.setup();
-
-    // 6. DiscordReactionReceptor - handles reactions
-    const reactionReceptor = new DiscordReactionReceptor({ bot, state });
-    reactionReceptor.setup();
-
-    console.log(`  ${botConfig.name}: Components initialized`);
+  if (state.bots.size === 0 && !bindingServer) {
+    console.error('Error: No bots initialized and no binding server running');
+    process.exit(1);
   }
 
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
+
+    if (bindingServer) {
+      await bindingServer.stop();
+    }
 
     for (const [botName, bot] of state.bots) {
       console.log(`  Disconnecting ${botName}...`);
@@ -186,27 +245,11 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  // Connect all bots
-  console.log('\nConnecting to services...');
-
-  for (const [botName, bot] of state.bots) {
-    try {
-      // Connect to Connectome gRPC server
-      await bot.grpcClient.connect();
-      console.log(`  ${botName}: Connected to Connectome`);
-
-      // Login to Discord
-      await bot.discord.login(bot.config.token);
-      console.log(`  ${botName}: Logged in to Discord`);
-
-      console.log(`  ${botName}: Ready for messages`);
-    } catch (error: any) {
-      console.error(`  ${botName}: Failed to connect: ${error.message}`);
-    }
-  }
-
   console.log('\n═══════════════════════════════════════════════════════');
   console.log(`  Discord AXON running with ${state.bots.size} bot(s)`);
+  if (bindingServer) {
+    console.log(`  Axon binding server on port ${bindingPort}`);
+  }
   console.log('  Listening for Discord events...');
   console.log('═══════════════════════════════════════════════════════');
   console.log('\nPress Ctrl+C to stop.\n');

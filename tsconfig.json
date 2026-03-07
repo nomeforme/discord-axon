@@ -14,6 +14,7 @@
     { "path": "../connectome-axon-interfaces" },
     { "path": "../axon-server" },
     { "path": "../connectome-grpc-common" },
-    { "path": "../connectome-ts" }
+    { "path": "../connectome-ts" },
+    { "path": "../connectome-axon-binding" }
   ]
 }

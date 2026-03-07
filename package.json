@@ -39,6 +39,7 @@
     "@connectome/axon-interfaces": "workspace:*",
     "@connectome/axon-server": "workspace:*",
     "@connectome/grpc-common": "workspace:*",
+    "@connectome/axon-binding": "workspace:*",
     "@sinclair/typebox": "^0.34.41",
     "@connectome/connectome-ts": "workspace:*",
     "discord.js": "^14.16.3",

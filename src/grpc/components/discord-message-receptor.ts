@@ -414,7 +414,7 @@ export class DiscordMessageReceptor {
         messageContent: message.content,
         authorName: message.author.displayName || message.author.username,
         streamType: 'discord',
-        targetBot: botName
+        targetBot: this.bot.config.agentName || botName
       });
       console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {

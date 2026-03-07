@@ -1,5 +1,7 @@
 /**
  * Type definitions for Discord AXON gRPC mode
+ *
+ * Bot identities are discovered from Discord on login, not from static config.
  */
 
 import type { Client } from 'discord.js';
@@ -7,37 +9,21 @@ import type { DiscordGrpcClient } from './client.js';
 import type { StreamManager } from './stream-manager.js';
 
 /**
- * Bot configuration from config.json
+ * Bot configuration — discovered from platform + env vars
  *
- * All cognition fields (model, tools, mcp, skills, rlm, etc.) live in
- * bot-runtime/config.json. The axon only needs identity + platform binding.
+ * name and userId are populated after Discord login.
+ * All cognition fields live in bot-runtime config.
  */
 export interface BotConfig {
   name: string;
+  /** Canonical agent name from bot-runtime (may differ from Discord display name) */
+  agentName?: string;
   token?: string;
-  prompt?: string;
-  /** Skip the platform identity text in system prompt */
-  skip_identity_prompt?: boolean;
   guild_id?: string | null;
-  auto_join_channels?: string[];
-  /** Remote mode: cognition delegated to bot-runtime (all bots are remote) */
-  remote?: boolean;
 }
 
 /**
- * Discord configuration from config.json
- */
-export interface DiscordConfig {
-  active_bots: string[];
-  bots: BotConfig[];
-  max_conversation_frames?: number;
-  max_bot_mentions_per_conversation?: number;
-  random_reply_chance?: number;
-  max_message_length?: number;
-}
-
-/**
- * Runtime configuration for commands (shared across all bots)
+ * Runtime configuration (from env vars with defaults, tunable via ! commands)
  */
 export interface RuntimeConfig {
   randomReplyChance: number;
@@ -65,7 +51,7 @@ export interface BotInstance {
 export interface SharedState {
   /** Map from bot name to bot instance */
   bots: Map<string, BotInstance>;
-  /** Map from Discord userId to bot name (for mention-based routing) */
+  /** Map from Discord userId to bot name — managed bots only (populated on login) */
   botUserIdToName: Map<string, string>;
   /** Track activations currently being processed (dedup) */
   processingActivations: Set<string>;
@@ -73,6 +59,4 @@ export interface SharedState {
   botInteractionCounts: Map<string, number>;
   /** Runtime configuration */
   runtimeConfig: RuntimeConfig;
-  /** All paired bot configs (for iteration) */
-  pairedBots: BotConfig[];
 }

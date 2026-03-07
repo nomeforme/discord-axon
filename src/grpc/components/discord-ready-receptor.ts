@@ -1,13 +1,10 @@
 /**
  * DiscordReadyReceptor - Handles Discord ready event
  *
- * Sets up the bot when Discord connection is established:
- * - Caches bot user ID and names
+ * Bot name and userId are already discovered during the login phase.
+ * This receptor handles post-ready setup:
  * - Registers bot mapping on Connectome server
- * - Triggers auto-join for configured channels
- *
- * This is separated from DiscordMessageReceptor for clarity,
- * following the pattern of having receptors handle specific event types.
+ * - Caches bot name variations for mention resolution
  */
 
 import { getUserNameCache } from '../utils/mention-resolver.js';
@@ -49,17 +46,16 @@ export class DiscordReadyReceptor {
 
   /**
    * Handle Discord ready event
+   *
+   * Bot identity (name, userId) was already discovered during login phase.
+   * This registers the mapping on the server and caches name variations.
    */
   private async handleReady(): Promise<void> {
     const botName = this.bot.config.name;
 
     console.log(`[DiscordReadyReceptor:${botName}] Logged in as ${this.bot.discord.user?.tag}`);
-    this.bot.userId = this.bot.discord.user?.id;
 
     if (this.bot.userId) {
-      // Register in shared state
-      this.state.botUserIdToName.set(this.bot.userId, botName);
-
       // Cache bot's Discord names for mention resolution
       const userId = this.bot.userId;
       if (this.bot.discord.user?.username) {
@@ -70,7 +66,7 @@ export class DiscordReadyReceptor {
         this.userNameCache.set(this.bot.discord.user.displayName.toLowerCase(), userId);
         console.log(`[DiscordReadyReceptor:${botName}] Cached displayName: ${this.bot.discord.user.displayName} -> ${userId}`);
       }
-      // Also cache config name variations
+      // Also cache name variations (with dashes replaced by spaces)
       this.userNameCache.set(botName.toLowerCase(), userId);
       this.userNameCache.set(botName.toLowerCase().replace(/-/g, ' '), userId);
 
