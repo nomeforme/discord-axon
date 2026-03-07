@@ -279,9 +279,20 @@ export class DiscordMessageReceptor {
           }
         }
 
+        // Resolve Discord mention IDs to display names (including exogenous bots/users)
+        let resolvedContent = message.content.replace(/<@!?(\d+)>/g, (match, id) => {
+          const cached = this.userIdToNameCache.get(id);
+          if (cached) return `@${cached}`;
+          const mentioned = message.mentions.users.get(id);
+          if (mentioned) return `@${mentioned.displayName || mentioned.username}`;
+          const member = message.guild?.members.cache.get(id);
+          if (member) return `@${member.displayName || member.user.username}`;
+          return match;
+        });
+
         // Emit message to Connectome
         await this.bot.grpcClient.emitDiscordMessage({
-          content: message.content,
+          content: resolvedContent,
           authorId: message.author.id,
           authorName: message.author.displayName || message.author.username,
           authorTag: message.author.tag,
