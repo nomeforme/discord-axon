@@ -18,6 +18,7 @@ import sharp from 'sharp';
 const IMAGE_MAX_DIMENSION = 1024;
 const IMAGE_JPEG_QUALITY = 80;
 const IMAGE_MAX_BYTES = 3_500_000; // Max compressed size before base64 (~4.7MB base64, under 5MB API limit)
+const FILE_MAX_BYTES = parseInt(process.env.FILE_MAX_BYTES || '10000000', 10); // Max non-image file size to download (default 10MB)
 import { messageDeduplicator } from '../../message-deduplicator.js';
 import { getUserNameCache, getUserIdToNameCache } from '../utils/mention-resolver.js';
 import type { BotInstance, SharedState, RuntimeConfig } from '../types.js';
@@ -580,8 +581,19 @@ export class DiscordMessageReceptor {
           size: att.size,
           data: base64Data ?? undefined
         });
+      } else if (att.url && att.size <= FILE_MAX_BYTES) {
+        // Non-image attachment: download and include as base64
+        const base64Data = await this.downloadFileAttachment(att.url, botName);
+        processed.push({
+          id: att.id,
+          url: att.url,
+          name: att.name ?? undefined,
+          contentType: contentType || undefined,
+          size: att.size,
+          data: base64Data ?? undefined,
+        });
       } else {
-        // Non-image attachment, include metadata only
+        // Too large or no URL — metadata only
         processed.push({
           id: att.id,
           url: att.url,
@@ -624,6 +636,30 @@ export class DiscordMessageReceptor {
       return null;
     } catch (error) {
       console.error(`[DiscordMessageReceptor:${botName}] Error downloading attachment:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Download a non-image file attachment from Discord CDN and return as raw base64
+   */
+  private async downloadFileAttachment(url: string, botName: string): Promise<string | null> {
+    try {
+      console.log(`[DiscordMessageReceptor:${botName}] Downloading file attachment from ${url}`);
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`[DiscordMessageReceptor:${botName}] Failed to download file: ${response.status}`);
+        return null;
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > FILE_MAX_BYTES) {
+        console.warn(`[DiscordMessageReceptor:${botName}] File too large (${buffer.length} bytes), skipping`);
+        return null;
+      }
+      console.log(`[DiscordMessageReceptor:${botName}] Downloaded file attachment: ${buffer.length} bytes`);
+      return buffer.toString('base64');
+    } catch (error) {
+      console.error(`[DiscordMessageReceptor:${botName}] Error downloading file attachment:`, error);
       return null;
     }
   }
