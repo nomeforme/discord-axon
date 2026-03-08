@@ -120,6 +120,39 @@ export class DiscordMessageReceptor {
       u => this.state.botUserIdToName.has(u.id)
     );
 
+    // Handle "m continue" — continuation command (resume truncated bot output)
+    // Must be checked before ! commands since it's a different prefix
+    if (/^m\s+(continue|go|more)\b/i.test(contentWithoutMentions)) {
+      // Only the mentioned/replied-to bot handles the command
+      if (anyBotMentioned && !thisBotMentioned) return;
+      if (!anyBotMentioned && !messageDeduplicator.shouldEmit(`m-${message.id}`, botName)) return;
+
+      console.log(`[DiscordMessageReceptor:${botName}] Continuation command detected, deleting trigger message`);
+
+      // Delete the "m continue" message so it doesn't appear in context
+      try {
+        await message.delete();
+      } catch (err: any) {
+        console.warn(`[DiscordMessageReceptor:${botName}] Could not delete m-command message: ${err.message}`);
+      }
+
+      // Activate the agent with continuation flag — skip normal message flow
+      try {
+        await this.bot.grpcClient.activateAgent(streamId, 'continuation', {
+          channelId: message.channel.id,
+          messageContent: '',
+          authorName: message.author.displayName || message.author.username,
+          streamType: 'discord',
+          targetBot: this.bot.config.agentName || botName,
+          continuation: 'true',
+        });
+        console.log(`[DiscordMessageReceptor:${botName}] Continuation activation sent for stream ${streamId}`);
+      } catch (error: any) {
+        console.error(`[DiscordMessageReceptor:${botName}] Error sending continuation activation:`, error.message);
+      }
+      return; // Don't emit to Connectome or proceed with normal flow
+    }
+
     // Handle ! commands (commands bypass normal message flow)
     if (contentWithoutMentions.startsWith('!')) {
       // If a bot was mentioned, only that bot handles the command
@@ -137,7 +170,8 @@ export class DiscordMessageReceptor {
       const response = this.commandEffector.handleCommand(
         message.content,
         this.state.runtimeConfig,
-        this.updateConfig
+        this.updateConfig,
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, payload)
       );
       if (response) {
         try {

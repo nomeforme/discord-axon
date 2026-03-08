@@ -24,8 +24,12 @@ export type ConfigUpdateCallback = (updates: Partial<RuntimeConfig>) => void;
  *
  * Constraint equivalent: EFFECTOR priority (processes command facets)
  */
+export type EmitEventCallback = (topic: string, payload: Record<string, any>) => Promise<any>;
+
 export class DiscordCommandEffector {
   private botName: string;
+  /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
+  private maxOutputTokensOverride: number | undefined;
 
   constructor(botName: string) {
     this.botName = botName;
@@ -37,12 +41,14 @@ export class DiscordCommandEffector {
    * @param message - The full message content
    * @param currentConfig - Current runtime configuration
    * @param updateConfig - Callback to update configuration
+   * @param emitEvent - Optional callback to emit events to Connectome (for per-bot config commands)
    * @returns Response message, or null if not a command
    */
   handleCommand(
     message: string,
     currentConfig: RuntimeConfig,
-    updateConfig: ConfigUpdateCallback
+    updateConfig: ConfigUpdateCallback,
+    emitEvent?: EmitEventCallback
   ): string | null {
     // Strip leading mentions
     let cleaned = message.trim();
@@ -72,6 +78,9 @@ export class DiscordCommandEffector {
       case '!mmf':
         return this.handleMaxMemoryFrames(args, currentConfig, updateConfig);
 
+      case '!mt':
+        return this.handleMaxTokens(args, emitEvent);
+
       default:
         return null; // Not a recognized command
     }
@@ -100,6 +109,12 @@ export class DiscordCommandEffector {
 
 \`!mmf [number]\` - Max memory frames
   - Frames kept in RAM (rest on disk)
+  - No argument shows current setting
+
+\`!mt [number]\` - Max output tokens (per-bot)
+  - Max tokens the bot generates per response
+  - 0 = reset to model default
+  - Mention a specific bot to target it
   - No argument shows current setting
 
 \`!help\` - Show this message`;
@@ -217,5 +232,43 @@ export class DiscordCommandEffector {
 
     updateConfig({ maxMemoryFrames: newMaxMemFrames });
     return `Max memory frames set to ${newMaxMemFrames}`;
+  }
+
+  /**
+   * Handle !mt (max output tokens) command — per-bot, routed via Connectome
+   */
+  private handleMaxTokens(
+    args: string,
+    emitEvent?: EmitEventCallback
+  ): string {
+    if (!args) {
+      // Show current override
+      if (this.maxOutputTokensOverride === undefined) {
+        return `Max output tokens for ${this.botName}: using model default`;
+      }
+      return `Max output tokens for ${this.botName}: ${this.maxOutputTokensOverride}`;
+    }
+
+    const newMaxTokens = parseInt(args);
+    if (isNaN(newMaxTokens) || newMaxTokens < 0) {
+      return 'Invalid value. Use a number >= 0 (0 = reset to model default)';
+    }
+
+    // 0 means reset to model default
+    const value = newMaxTokens === 0 ? undefined : newMaxTokens;
+    this.maxOutputTokensOverride = value;
+
+    // Emit config event to Connectome so bot-runtime picks it up
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        maxOutputTokens: value ?? null,  // null signals "reset to default"
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit config event:`, e.message));
+    }
+
+    if (value === undefined) {
+      return `Max output tokens for ${this.botName} reset to model default`;
+    }
+    return `Max output tokens for ${this.botName} set to ${value}`;
   }
 }
