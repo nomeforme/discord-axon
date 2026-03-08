@@ -166,6 +166,18 @@ async function main(): Promise<void> {
 
       // Connect gRPC
       await bot.grpcClient.connect();
+
+      // Subscribe to typing-stop events (bot-runtime signals cycle completion)
+      bot.grpcClient.subscribeToTypingStop((agentName, streamId) => {
+        // Match by agentName (bot-runtime name) to this bot's name or agentName
+        if (agentName !== name && agentName !== bot.config.agentName) return;
+        const interval = bot.activeTypingIntervals?.get(streamId);
+        if (interval) {
+          clearInterval(interval);
+          bot.activeTypingIntervals?.delete(streamId);
+        }
+      });
+
       console.log(`  ${name}: Components initialized, gRPC connected [${source}]`);
 
       return name;

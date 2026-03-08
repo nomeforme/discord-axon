@@ -574,4 +574,26 @@ export class DiscordGrpcClient extends EventEmitter {
       sequence: result.sequence
     };
   }
+
+  /**
+   * Subscribe to agent-typing-stop events (cycle completion signal).
+   * Used by the axon to clear typing indicators when the bot-runtime finishes a cycle.
+   */
+  subscribeToTypingStop(
+    callback: (agentName: string, streamId: string) => void,
+  ): () => void {
+    return this.client.subscribe(
+      {
+        filters: [{ types: ['agent-typing-stop'] }],
+        includeExisting: false,
+        streamIds: [],
+      },
+      (delta: FacetDelta) => {
+        if (delta.type === 'added' && delta.facet) {
+          const state = delta.facet.state || {};
+          callback(state.targetAgent || '', state.streamId || '');
+        }
+      },
+    );
+  }
 }

@@ -6,6 +6,8 @@
  * - !bb - Bot-to-bot mention limit
  * - !mcf - Max conversation frames
  * - !mmf - Max memory frames
+ * - !stop - Abort the current agent cycle
+ * - !steer <message> - Redirect the running agent mid-cycle
  * - !help - Show available commands
  *
  * This is the gRPC client-side equivalent - it processes commands
@@ -81,6 +83,12 @@ export class DiscordCommandEffector {
       case '!mt':
         return this.handleMaxTokens(args, emitEvent);
 
+      case '!stop':
+        return this.handleStop(emitEvent);
+
+      case '!steer':
+        return this.handleSteer(args, emitEvent);
+
       default:
         return null; // Not a recognized command
     }
@@ -116,6 +124,9 @@ export class DiscordCommandEffector {
   - 0 = reset to model default
   - Mention a specific bot to target it
   - No argument shows current setting
+
+\`!stop\` - Abort the current agent cycle
+\`!steer <message>\` - Redirect the running agent mid-cycle
 
 \`!help\` - Show this message`;
   }
@@ -232,6 +243,34 @@ export class DiscordCommandEffector {
 
     updateConfig({ maxMemoryFrames: newMaxMemFrames });
     return `Max memory frames set to ${newMaxMemFrames}`;
+  }
+
+  /**
+   * Handle !stop — abort the current agent cycle
+   */
+  private handleStop(emitEvent?: EmitEventCallback): string {
+    if (emitEvent) {
+      emitEvent('agent:command', {
+        type: 'stop',
+        targetAgent: this.botName,
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit stop:`, e.message));
+    }
+    return `Stopping ${this.botName}...`;
+  }
+
+  /**
+   * Handle !steer <message> — redirect the running agent mid-cycle
+   */
+  private handleSteer(args: string, emitEvent?: EmitEventCallback): string {
+    if (!args) return 'Usage: `!steer <message>`';
+    if (emitEvent) {
+      emitEvent('agent:command', {
+        type: 'steer',
+        message: args,
+        targetAgent: this.botName,
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit steer:`, e.message));
+    }
+    return `Steering ${this.botName}: ${args}`;
   }
 
   /**

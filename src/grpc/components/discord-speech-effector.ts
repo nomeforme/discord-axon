@@ -137,11 +137,20 @@ export class DiscordSpeechEffector {
         }
         console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length || (files.length > 0 ? 1 : 0)} chunk(s)${files.length > 0 ? ` with ${files.length} attachment(s)` : ''}`);
 
-        // Clear typing indicator for this stream
-        const typingInterval = this.activeTypingIntervals?.get(streamInfo.streamId);
-        if (typingInterval) {
-          clearInterval(typingInterval);
-          this.activeTypingIntervals?.delete(streamInfo.streamId);
+        // Typing indicator: clear on final speech, restart on per-turn (cycle still running)
+        // cyclePending lives in facet.state (serialized through gRPC stateJson)
+        if (facet.state?.cyclePending && this.activeTypingIntervals?.has(streamInfo.streamId)) {
+          // Per-turn speech — cycle is still running, restart typing
+          if ('sendTyping' in channel) {
+            channel.sendTyping().catch(() => {});
+          }
+        } else {
+          // Final speech or cycle complete — clear typing
+          const typingInterval = this.activeTypingIntervals?.get(streamInfo.streamId);
+          if (typingInterval) {
+            clearInterval(typingInterval);
+            this.activeTypingIntervals?.delete(streamInfo.streamId);
+          }
         }
       }
     } catch (error: any) {

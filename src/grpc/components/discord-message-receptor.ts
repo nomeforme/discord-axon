@@ -448,18 +448,23 @@ export class DiscordMessageReceptor {
         }
       );
 
-      // Send typing indicator, refresh every 8s (Discord typing expires after 10s)
-      // Cleared by speech effector on delivery, or auto-clears after 120s as safety net.
+      // Send typing indicator, refresh every 8s (Discord typing expires after 10s).
+      // Kept alive through per-turn speech deliveries. Safety timeout at 10min for
+      // long-running workflows (SSH, installs, RLM sub-agents). Cleared on cycle end
+      // via agent:typing-stop event, or when the safety timeout fires.
       if ('sendTyping' in message.channel) {
         const ch = message.channel;
         ch.sendTyping().catch(() => {});
+        // Clear any existing interval for this stream first
+        const existing = this.bot.activeTypingIntervals?.get(streamId);
+        if (existing) clearInterval(existing);
         const typingInterval = setInterval(() => {
           ch.sendTyping().catch(() => {
             clearInterval(typingInterval);
             this.bot.activeTypingIntervals?.delete(streamId);
           });
         }, 8000);
-        setTimeout(() => { clearInterval(typingInterval); this.bot.activeTypingIntervals?.delete(streamId); }, 120000);
+        setTimeout(() => { clearInterval(typingInterval); this.bot.activeTypingIntervals?.delete(streamId); }, 600000);
         this.bot.activeTypingIntervals?.set(streamId, typingInterval);
       }
 
