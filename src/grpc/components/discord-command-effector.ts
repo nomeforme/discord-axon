@@ -8,6 +8,7 @@
  * - !mmf - Max memory frames
  * - !stop - Abort the current agent cycle
  * - !steer <message> - Redirect the running agent mid-cycle
+ * - !autotrigger - Enable/disable autonomous self-triggering loop
  * - !help - Show available commands
  *
  * This is the gRPC client-side equivalent - it processes commands
@@ -89,6 +90,12 @@ export class DiscordCommandEffector {
       case '!steer':
         return this.handleSteer(args, emitEvent);
 
+      case '!autotrigger':
+        return this.handleAutoTrigger(args, emitEvent);
+
+      case '!stream':
+        return this.handleStream(args, emitEvent);
+
       default:
         return null; // Not a recognized command
     }
@@ -127,6 +134,18 @@ export class DiscordCommandEffector {
 
 \`!stop\` - Abort the current agent cycle
 \`!steer <message>\` - Redirect the running agent mid-cycle
+
+\`!stream in <name>\` - Enter a named substream
+  - Bot activations redirect to the substream (full history)
+  - \`!stream out <name>\` = exit substream, return to parent channel
+  - \`!stream\` = show usage
+
+\`!autotrigger [on|off]\` - Autonomous self-triggering loop
+  - \`on\` or no argument = enable
+  - \`off\` = disable
+  - Bot must call \`continue_substream\` tool to get another cycle (no call = loop ends)
+  - \`--stream <name>\` = shorthand: enter stream + enable autotrigger
+  - \`--max-speech-only <N>\` = safety net: eject after N idle cycles (default: 5)
 
 \`!help\` - Show this message`;
   }
@@ -309,5 +328,108 @@ export class DiscordCommandEffector {
       return `Max output tokens for ${this.botName} reset to model default`;
     }
     return `Max output tokens for ${this.botName} set to ${value}`;
+  }
+
+  /**
+   * Handle !autotrigger — enable/disable autonomous self-triggering loop
+   *
+   * Usage:
+   *   !autotrigger              → enable autotrigger
+   *   !autotrigger on           → enable autotrigger
+   *   !autotrigger off          → disable autotrigger
+   *   !autotrigger --stream X  → shorthand: enter substream + enable autotrigger
+   */
+  private handleAutoTrigger(args: string, emitEvent?: EmitEventCallback): string {
+    const parts = args.split(/\s+/).filter(Boolean);
+    let enable = true;
+    let substreamName: string | undefined;
+    let maxSpeechOnly: number | undefined;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i].toLowerCase();
+      if (part === 'off') {
+        enable = false;
+      } else if (part === 'on') {
+        enable = true;
+      } else if (part === '--stream' && i + 1 < parts.length) {
+        substreamName = parts[i + 1];
+        i++;
+      } else if (part === '--max-speech-only' && i + 1 < parts.length) {
+        const val = parseInt(parts[i + 1], 10);
+        if (!isNaN(val) && val > 0) maxSpeechOnly = val;
+        i++;
+      }
+    }
+
+    if (emitEvent) {
+      // If --stream was specified and enabling, emit substream command FIRST
+      if (substreamName && enable) {
+        emitEvent('agent:command', {
+          type: 'workflow',
+          targetAgent: this.botName,
+          enable: true,
+          workflowName: substreamName,
+        }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit substream:`, e.message));
+      }
+
+      // Emit autotrigger command (substream handled separately above)
+      emitEvent('agent:command', {
+        type: 'autotrigger',
+        targetAgent: this.botName,
+        enable,
+        maxSpeechOnly,
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit autotrigger:`, e.message));
+    }
+
+    if (!enable) {
+      return `Autotrigger disabled for ${this.botName}`;
+    }
+    const ssMsg = substreamName ? ` (substream: ${substreamName})` : '';
+    const msoMsg = maxSpeechOnly ? `, max-speech-only: ${maxSpeechOnly}` : '';
+    return `Autotrigger enabled for ${this.botName}${ssMsg}${msoMsg} — use \`!stop\` to halt`;
+  }
+
+  /**
+   * Handle !stream — enter/exit a named substream
+   *
+   * Usage:
+   *   !stream in <name>   → enter substream
+   *   !stream out <name>  → exit substream
+   *   !stream             → show usage
+   */
+  private handleStream(args: string, emitEvent?: EmitEventCallback): string {
+    const parts = args.split(/\s+/).filter(Boolean);
+
+    if (parts.length === 0) {
+      return `Usage: \`!stream in <name>\` to enter, \`!stream out <name>\` to exit.`;
+    }
+
+    const direction = parts[0].toLowerCase();
+
+    if (direction === 'out') {
+      if (emitEvent) {
+        emitEvent('agent:command', {
+          type: 'workflow',
+          targetAgent: this.botName,
+          enable: false,
+        }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit stream out:`, e.message));
+      }
+      return `Substream exited for ${this.botName}`;
+    }
+
+    if (direction === 'in' && parts.length >= 2) {
+      const substreamName = parts[1];
+      if (emitEvent) {
+        emitEvent('agent:command', {
+          type: 'workflow',
+          targetAgent: this.botName,
+          enable: true,
+          workflowName: substreamName,
+        }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit stream in:`, e.message));
+      }
+      return `Substream "${substreamName}" entered for ${this.botName}`;
+    }
+
+    return `Usage: \`!stream in <name>\` to enter, \`!stream out <name>\` to exit.`;
   }
 }

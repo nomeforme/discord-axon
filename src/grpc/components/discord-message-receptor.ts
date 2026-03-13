@@ -172,7 +172,7 @@ export class DiscordMessageReceptor {
         message.content,
         this.state.runtimeConfig,
         this.updateConfig,
-        (topic, payload) => this.bot.grpcClient.emitEvent(topic, payload)
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId })
       );
       if (response) {
         try {
@@ -430,13 +430,17 @@ export class DiscordMessageReceptor {
     // ========================================================================
     try {
       // Ensure this bot's stream manager is subscribed so its
-      // speech effector receives the reply (the emit lottery winner may be a different bot)
+      // speech effector receives the reply (the emit lottery winner may be a different bot).
+      // Re-uses the same channelName/channelType/parentStreamId from the emit block above;
+      // getOrCreateStream is idempotent and returns cached info if already created.
       const channelName2 = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
       const channelType2 = isDM ? 'dm' : isThread ? 'thread' : 'text';
       let parentStreamId2: string | undefined;
       if (isThread && message.guild?.id && 'parentId' in message.channel && message.channel.parentId) {
         parentStreamId2 = `discord:${message.guild.id}:${message.channel.parentId}`;
       }
+      // Note: This is NOT a duplicate call — the emit block above only runs for the dedup winner.
+      // Non-winning bots that still need to activate must ensure their stream manager is subscribed.
       await this.bot.streamManager.getOrCreateStream(
         message.channel.id,
         {

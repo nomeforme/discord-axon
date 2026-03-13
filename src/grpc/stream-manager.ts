@@ -121,39 +121,24 @@ export class StreamManager extends EventEmitter {
       return;
     }
 
-    // Subscribe to speech
-    const speechUnsub = this.client.subscribeToSpeech(
+    // Single combined subscription for both speech and actions (reduces gRPC stream count by 50%)
+    const unsub = this.client.subscribeToStreamDeltas(
       (facet) => {
         const info = this.streams.get(streamId);
-        if (info && this.speechCallback) {
-          this.speechCallback(facet, info);
+        if (!info) return;
+
+        if (facet.type === 'speech') {
+          if (this.speechCallback) this.speechCallback(facet, info);
+          this.emit('speech', facet, info);
+        } else if (facet.type === 'action') {
+          if (this.actionCallback) this.actionCallback(facet, info);
+          this.emit('action', facet, info);
         }
-        this.emit('speech', facet, info);
       },
-      {
-        streamIds: [streamId]
-      }
+      { streamIds: [streamId] }
     );
 
-    // Subscribe to actions
-    const actionUnsub = this.client.subscribeToActions(
-      (facet) => {
-        const info = this.streams.get(streamId);
-        if (info && this.actionCallback) {
-          this.actionCallback(facet, info);
-        }
-        this.emit('action', facet, info);
-      },
-      {
-        streamIds: [streamId]
-      }
-    );
-
-    // Combined unsubscribe
-    this.unsubscribes.set(streamId, () => {
-      speechUnsub();
-      actionUnsub();
-    });
+    this.unsubscribes.set(streamId, unsub);
   }
 
   /**

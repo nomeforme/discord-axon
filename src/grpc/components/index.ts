@@ -33,3 +33,6 @@ export type { ConfigUpdateCallback } from './discord-command-effector.js';
 
 export { DiscordSpeechEffector } from './discord-speech-effector.js';
 export type { DiscordSpeechEffectorConfig } from './discord-speech-effector.js';
+
+export { SubstreamRelayEffector } from './substream-relay-effector.js';
+export type { SubstreamRelayEffectorConfig } from './substream-relay-effector.js';

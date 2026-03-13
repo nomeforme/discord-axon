@@ -383,6 +383,29 @@ export class DiscordGrpcClient extends EventEmitter {
   }
 
   /**
+   * Subscribe to both speech and action facets in a single gRPC stream.
+   * Used by StreamManager to reduce subscription count by 50%.
+   */
+  subscribeToStreamDeltas(
+    callback: (facet: any) => void,
+    options?: { streamIds?: string[] }
+  ): () => void {
+    const subOptions: SubscriptionOptions = {
+      filters: [
+        { types: ['speech', 'action'] }
+      ],
+      includeExisting: false,
+      streamIds: options?.streamIds || []
+    };
+
+    return this.client.subscribe(subOptions, (delta: FacetDelta) => {
+      if (delta.type === 'added' && delta.facet) {
+        callback(delta.facet);
+      }
+    });
+  }
+
+  /**
    * Subscribe to agent-activation facets (for running agent locally)
    */
   subscribeToActivations(
@@ -573,6 +596,33 @@ export class DiscordGrpcClient extends EventEmitter {
       success: result.success,
       sequence: result.sequence
     };
+  }
+
+  /**
+   * Get stream info (including parentId) from the server via state snapshot.
+   * Returns the stream info for the given streamId, or null if not found.
+   */
+  async getStreamInfo(
+    streamId: string
+  ): Promise<{ id: string; name: string; metadata: Record<string, string>; parentId: string } | null> {
+    try {
+      const snapshot = await this.client.getStateSnapshot({
+        streamIds: [streamId],
+        facetTypes: ['__none__'],   // Non-existent type to skip facets (we only need streams)
+        timeoutMs: 10000,
+      });
+      const stream = (snapshot.streams || []).find((s: any) => s.id === streamId);
+      if (!stream) return null;
+      return {
+        id: stream.id,
+        name: stream.name || '',
+        metadata: stream.metadata || {},
+        parentId: stream.parentId || stream.parent_id || '',
+      };
+    } catch (error: any) {
+      console.error(`[DiscordGrpcClient] Failed to get stream info for ${streamId}: ${error.message}`);
+      return null;
+    }
   }
 
   /**

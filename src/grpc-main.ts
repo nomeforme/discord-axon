@@ -36,6 +36,7 @@ import {
   FocusedContextTransform,
   DiscordCommandEffector,
   DiscordSpeechEffector,
+  SubstreamRelayEffector,
   // Types
   type SharedState,
   type RuntimeConfig,
@@ -85,6 +86,9 @@ async function main(): Promise<void> {
 
   // Track context transforms for runtime config updates
   const contextTransforms: FocusedContextTransform[] = [];
+
+  // Workflow relay: created once after the first bot connects
+  let substreamRelay: SubstreamRelayEffector | null = null;
 
   const updateRuntimeConfig = (updates: Partial<RuntimeConfig>) => {
     Object.assign(state.runtimeConfig, updates);
@@ -148,7 +152,7 @@ async function main(): Promise<void> {
       });
       contextTransforms.push(contextTransform);
 
-      const commandEffector = new DiscordCommandEffector(name);
+      const commandEffector = new DiscordCommandEffector(agentName || name);
 
       const readyReceptor = new DiscordReadyReceptor({ bot, state });
       readyReceptor.setup();
@@ -177,6 +181,13 @@ async function main(): Promise<void> {
           bot.activeTypingIntervals?.delete(streamId);
         }
       });
+
+      // Start substream relay after the first bot connects (singleton)
+      if (!substreamRelay) {
+        substreamRelay = new SubstreamRelayEffector({ state });
+        substreamRelay.setup();
+        console.log(`  [SubstreamRelay] Started (using ${name}'s gRPC connection)`);
+      }
 
       console.log(`  ${name}: Components initialized, gRPC connected [${source}]`);
 
@@ -237,6 +248,11 @@ async function main(): Promise<void> {
   // Handle shutdown
   const shutdown = async (): Promise<void> => {
     console.log('\n\nShutting down...');
+
+    if (substreamRelay) {
+      substreamRelay.destroy();
+      substreamRelay = null;
+    }
 
     if (bindingServer) {
       await bindingServer.stop();
