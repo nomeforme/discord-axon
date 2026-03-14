@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **discord-axon** (406 symbols, 876 relationships, 32 execution flows).
+This project is indexed by GitNexus as **discord-axon** (318 symbols, 686 relationships, 25 execution flows).
 
 GitNexus provides a knowledge graph over this codebase — call chains, blast radius, execution flows, and semantic search.
 
