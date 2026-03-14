@@ -47,8 +47,6 @@ export class SubstreamRelayEffector {
   private debounceWindowMs: number;
   private unsubscribe?: () => void;
 
-  /** Cache: substreamId -> parent channel info */
-  private parentCache: Map<string, SubstreamParentInfo> = new Map();
   /** Cache: substreamId -> null (lookup failed, don't retry for a while) */
   private failedLookups: Map<string, number> = new Map();
 
@@ -247,13 +245,9 @@ export class SubstreamRelayEffector {
   private async resolveParentChannel(
     substreamId: string
   ): Promise<SubstreamParentInfo | null> {
-    // Check cache
-    const cached = this.parentCache.get(substreamId);
-    if (cached) return cached;
-
-    // Check if we recently failed to look this up (retry after 60s)
+    // Check if we recently failed to look this up (retry after 10s)
     const failedAt = this.failedLookups.get(substreamId);
-    if (failedAt && Date.now() - failedAt < 60000) {
+    if (failedAt && Date.now() - failedAt < 10_000) {
       return null;
     }
 
@@ -274,7 +268,7 @@ export class SubstreamRelayEffector {
       const parentStreamId = streamInfo.parentId;
       const channelInfo = this.parseDiscordStreamId(parentStreamId);
       if (!channelInfo) {
-        console.warn(`[SubstreamRelay] Parent stream ${parentStreamId} is not a Discord stream`);
+        // Parent is on another platform (e.g. Signal) — not our concern
         this.failedLookups.set(substreamId, Date.now());
         return null;
       }
@@ -286,7 +280,6 @@ export class SubstreamRelayEffector {
         ownerAgent: streamInfo.metadata?.createdBy || streamInfo.metadata?.participants,
       };
 
-      this.parentCache.set(substreamId, info);
       console.log(`[SubstreamRelay] Resolved ${substreamId} -> channel ${channelInfo.channelId}`);
       return info;
     } catch (error: any) {
