@@ -51,7 +51,8 @@ export class DiscordCommandEffector {
     message: string,
     currentConfig: RuntimeConfig,
     updateConfig: ConfigUpdateCallback,
-    emitEvent?: EmitEventCallback
+    emitEvent?: EmitEventCallback,
+    attachments?: any[]
   ): string | null {
     // Strip leading mentions
     let cleaned = message.trim();
@@ -88,7 +89,7 @@ export class DiscordCommandEffector {
         return this.handleStop(emitEvent);
 
       case '!steer':
-        return this.handleSteer(args, emitEvent);
+        return this.handleSteer(args, emitEvent, attachments);
 
       case '!autotrigger':
         return this.handleAutoTrigger(args, emitEvent);
@@ -280,16 +281,17 @@ export class DiscordCommandEffector {
   /**
    * Handle !steer <message> — redirect the running agent mid-cycle
    */
-  private handleSteer(args: string, emitEvent?: EmitEventCallback): string {
-    if (!args) return 'Usage: `!steer <message>`';
+  private handleSteer(args: string, emitEvent?: EmitEventCallback, attachments?: any[]): string {
+    if (!args && !attachments?.length) return 'Usage: `!steer <message>`';
     if (emitEvent) {
       emitEvent('agent:command', {
         type: 'steer',
-        message: args,
+        message: args || '(file attached)',
         targetAgent: this.botName,
+        ...(attachments?.length ? { attachments } : {}),
       }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit steer:`, e.message));
     }
-    return `Steering ${this.botName}: ${args}`;
+    return `Steering ${this.botName}: ${args || '(file attached)'}`;
   }
 
   /**

@@ -168,11 +168,18 @@ export class DiscordMessageReceptor {
         }
       }
 
+      // Process attachments for !steer commands so files reach the substream
+      let commandAttachments: any[] | undefined;
+      if (contentWithoutMentions.startsWith('!steer') && message.attachments.size > 0) {
+        commandAttachments = await this.processAttachments(message.attachments);
+      }
+
       const response = this.commandEffector.handleCommand(
         message.content,
         this.state.runtimeConfig,
         this.updateConfig,
-        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId })
+        (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
+        commandAttachments
       );
       if (response) {
         try {
@@ -208,10 +215,8 @@ export class DiscordMessageReceptor {
     // ========================================================================
     const isFromKnownBot = this.state.botUserIdToName.has(message.author.id);
 
-    // Check if message has image attachments
-    const hasImageAttachments = [...message.attachments.values()].some(
-      att => att.contentType?.startsWith('image/')
-    );
+    // Check if message has any attachments (images, files, etc.)
+    const hasAttachments = message.attachments.size > 0;
 
     // Find all targeted bots (mentioned + replied to)
     const targetedBotNames: string[] = [];
@@ -226,12 +231,15 @@ export class DiscordMessageReceptor {
     }
 
     // Determine priority emitter for attachment+targeted case
+    // When a message has attachments and targets specific bots, the first
+    // targeted bot (alphabetically) gets emission priority so it also
+    // processes attachments for its activation metadata (substream relay).
     let priorityEmitter: string | null = null;
-    if (hasImageAttachments && targetedBotNames.length > 0) {
+    if (hasAttachments && targetedBotNames.length > 0) {
       // Sort alphabetically and pick first
       targetedBotNames.sort();
       priorityEmitter = targetedBotNames[0];
-      console.log(`[DiscordMessageReceptor:${botName}] Message has image + targets: [${targetedBotNames.join(', ')}], priority emitter: ${priorityEmitter}`);
+      console.log(`[DiscordMessageReceptor:${botName}] Message has attachments + targets: [${targetedBotNames.join(', ')}], priority emitter: ${priorityEmitter}`);
     }
 
     // Track if this bot should skip activation due to not being priority emitter
@@ -259,6 +267,16 @@ export class DiscordMessageReceptor {
       shouldEmit = messageDeduplicator.shouldEmit(message.id, botName);
     }
 
+    // Process attachments once — used for both emit and activation metadata
+    let processedAttachments: Awaited<ReturnType<typeof this.processAttachments>> = [];
+    if (shouldEmit && message.attachments.size > 0) {
+      processedAttachments = await this.processAttachments(message.attachments);
+      if (processedAttachments.length > 0) {
+        const imageCount = processedAttachments.filter(a => a.data).length;
+        console.log(`[DiscordMessageReceptor:${botName}] Processed ${processedAttachments.length} attachment(s), ${imageCount} with image data`);
+      }
+    }
+
     if (shouldEmit) {
       try {
         const channelName = 'name' in message.channel ? (message.channel.name ?? 'DM') : 'DM';
@@ -282,12 +300,6 @@ export class DiscordMessageReceptor {
           }
         );
 
-        // Process attachments - only the emitting bot does this
-        const processedAttachments = await this.processAttachments(message.attachments);
-        if (processedAttachments.length > 0) {
-          const imageCount = processedAttachments.filter(a => a.data).length;
-          console.log(`[DiscordMessageReceptor:${botName}] Processed ${processedAttachments.length} attachment(s), ${imageCount} with image data`);
-        }
 
         // Fetch reply info if this is a reply
         let replyTo: { messageId?: string; channelId?: string; authorId?: string; author?: string } | undefined;
@@ -476,8 +488,12 @@ export class DiscordMessageReceptor {
         channelId: message.channel.id,
         messageContent: message.content,
         authorName: message.author.displayName || message.author.username,
+        authorId: message.author.id,
+        messageId: message.id,
+        timestamp: String(message.createdTimestamp),
         streamType: 'discord',
-        targetBot: this.bot.config.agentName || botName
+        targetBot: this.bot.config.agentName || botName,
+        ...(processedAttachments?.length ? { attachmentsJson: JSON.stringify(processedAttachments) } : {}),
       });
       console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {
