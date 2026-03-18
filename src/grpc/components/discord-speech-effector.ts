@@ -137,15 +137,14 @@ export class DiscordSpeechEffector {
         }
         console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length || (files.length > 0 ? 1 : 0)} chunk(s)${files.length > 0 ? ` with ${files.length} attachment(s)` : ''}`);
 
-        // Typing indicator: clear on final speech, restart on per-turn (cycle still running)
-        // cyclePending lives in facet.state (serialized through gRPC stateJson)
-        if (facet.state?.cyclePending && this.activeTypingIntervals?.has(streamInfo.streamId)) {
-          // Per-turn speech — cycle is still running, restart typing
-          if ('sendTyping' in channel) {
-            channel.sendTyping().catch(() => {});
-          }
-        } else {
-          // Final speech or cycle complete — clear typing
+        // Typing indicator management:
+        // - cyclePending=true (per-turn): let the existing 8s interval handle refresh.
+        //   Do NOT call sendTyping() here — Discord auto-clears typing on message send,
+        //   and re-sending it immediately makes typing visually restart after each message.
+        // - cyclePending=false/absent (final speech): clear the interval.
+        // - agent:typing-stop event is the primary stop mechanism (handles substreams,
+        //   turnEmitted skipping final record, etc.)
+        if (!facet.state?.cyclePending) {
           const typingInterval = this.activeTypingIntervals?.get(streamInfo.streamId);
           if (typingInterval) {
             clearInterval(typingInterval);

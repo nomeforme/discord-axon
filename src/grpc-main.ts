@@ -179,6 +179,7 @@ async function main(): Promise<void> {
         if (interval) {
           clearInterval(interval);
           bot.activeTypingIntervals?.delete(streamId);
+          console.log(`[TypingStop:${name}] Cleared typing interval for ${streamId}`);
         }
       });
 
