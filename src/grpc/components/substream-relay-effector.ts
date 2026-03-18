@@ -12,13 +12,14 @@
  * 4. Sends formatted relay messages showing substream progress
  *
  * Message format:
- *   Speech: > **[substream:nanogpt-training]** opus-4.6: <content truncated to ~500 chars>
+ *   Speech: > **[substream:nanogpt-training]** opus-4.6: <content split across messages>
  *   Action: > **[substream:nanogpt-training]** opus-4.6 -> @terminal
  */
 
 import type { Client } from 'discord.js';
 import type { DiscordGrpcClient } from '../client.js';
 import type { SharedState } from '../types.js';
+import { splitMessage } from '../utils/index.js';
 
 export interface SubstreamRelayEffectorConfig {
   /** Shared state with all bot instances */
@@ -61,7 +62,7 @@ export class SubstreamRelayEffector {
 
   constructor(config: SubstreamRelayEffectorConfig) {
     this.state = config.state;
-    this.maxRelayContentLength = config.maxRelayContentLength ?? 500;
+    this.maxRelayContentLength = config.maxRelayContentLength ?? 0; // 0 = unlimited
     this.debounceWindowMs = config.debounceWindowMs ?? 1500;
   }
 
@@ -210,16 +211,35 @@ export class SubstreamRelayEffector {
     }
 
     // Clean up: collapse multiple newlines, strip leading/trailing whitespace
-    const cleaned = content.replace(/\n{3,}/g, '\n\n').trim();
+    let cleaned = content.replace(/\n{3,}/g, '\n\n').trim();
 
-    // Discord max is 2000 chars — truncate the content portion to fit within that
+    // Apply configurable content limit (0 = unlimited)
+    if (this.maxRelayContentLength > 0 && cleaned.length > this.maxRelayContentLength) {
+      cleaned = cleaned.substring(0, this.maxRelayContentLength) + '...';
+    }
+
+    // Split content across multiple Discord messages (2000 char limit each).
+    // First chunk gets the substream prefix; subsequent chunks are plain.
     const prefix = `> **[${substreamId}]** ${agentName}: `;
-    const maxContent = 2000 - prefix.length;
-    const message = cleaned
-      ? prefix + (cleaned.length > maxContent ? cleaned.substring(0, maxContent) : cleaned)
-      : '';
+    const firstChunkMax = 2000 - prefix.length;
 
-    await this.sendToChannel(parentInfo, message, agentName, files);
+    if (!cleaned && files.length > 0) {
+      // Attachment-only relay
+      await this.sendToChannel(parentInfo, prefix, agentName, files);
+    } else if (cleaned.length <= firstChunkMax) {
+      // Fits in one message with prefix
+      await this.sendToChannel(parentInfo, prefix + cleaned, agentName, files);
+    } else {
+      // Multi-part: first chunk sized to fit the prefix, rest split at 2000
+      const firstPart = cleaned.substring(0, firstChunkMax);
+      const rest = cleaned.substring(firstChunkMax);
+      const restChunks = rest ? splitMessage(rest, 2000) : [];
+
+      await this.sendToChannel(parentInfo, prefix + firstPart, agentName, files);
+      for (const chunk of restChunks) {
+        await this.sendToChannel(parentInfo, chunk, agentName);
+      }
+    }
   }
 
   /**
