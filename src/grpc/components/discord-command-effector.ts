@@ -133,6 +133,8 @@ export class DiscordCommandEffector {
   - Mention a specific bot to target it
   - No argument shows current setting
 
+\`!continue\` - Continue from the bot's last message (prefill)
+  - Also: \`m continue\`, \`m go\`, \`m more\`
 \`!stop\` - Abort the current agent cycle
 \`!steer <message>\` - Redirect the running agent mid-cycle
 
