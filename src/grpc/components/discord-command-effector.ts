@@ -15,7 +15,11 @@
  * and returns responses to be sent via Discord.
  */
 
+import { mkdirSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
+import { join } from 'path';
 import type { RuntimeConfig } from '../types.js';
+
+const SECRETS_DIR = '/workspace/shared/secrets';
 
 /**
  * Callback type for updating config values
@@ -97,6 +101,9 @@ export class DiscordCommandEffector {
       case '!stream':
         return this.handleStream(args, emitEvent);
 
+      case '!secret':
+        return this.handleSecret(args);
+
       default:
         return null; // Not a recognized command
     }
@@ -150,7 +157,59 @@ export class DiscordCommandEffector {
   - \`--stream <name>\` = shorthand: enter stream + enable autotrigger
   - \`--max-speech-only <N>\` = safety net: eject after N idle cycles (default: 5)
 
+\`!secret <name> <value>\` - Store a secret (never reaches VEIL)
+  - \`!secret HF_TOKEN hf_abc123\` = store
+  - \`!secret list\` = list names (not values)
+  - \`!secret delete <name>\` = remove
+  - Bots use \`inject_secret\` tool to pipe to remote .env files
+
 \`!help\` - Show this message`;
+  }
+
+  /**
+   * Handle !secret command — write to shared secrets dir, never touches VEIL
+   */
+  private handleSecret(args: string): string | null {
+    try {
+      mkdirSync(SECRETS_DIR, { recursive: true });
+    } catch { /* already exists */ }
+
+    if (!args || args === 'list') {
+      try {
+        const files = readdirSync(SECRETS_DIR);
+        if (files.length === 0) return 'No secrets stored.';
+        return `**Stored secrets:** ${files.join(', ')}`;
+      } catch {
+        return 'No secrets stored.';
+      }
+    }
+
+    if (args.startsWith('delete ')) {
+      const name = args.slice(7).trim();
+      if (!name) return 'Usage: `!secret delete <name>`';
+      try {
+        unlinkSync(join(SECRETS_DIR, name));
+        return `Deleted secret: ${name}`;
+      } catch {
+        return `Secret not found: ${name}`;
+      }
+    }
+
+    const spaceIdx = args.indexOf(' ');
+    if (spaceIdx === -1) return 'Usage: `!secret <name> <value>`';
+
+    const name = args.slice(0, spaceIdx).trim();
+    const value = args.slice(spaceIdx + 1).trim();
+
+    if (!name || !value) return 'Usage: `!secret <name> <value>`';
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) return 'Secret name must be alphanumeric/underscore.';
+
+    try {
+      writeFileSync(join(SECRETS_DIR, name), value, { mode: 0o600 });
+      return `Secret stored: **${name}** (${value.length} chars)`;
+    } catch (err: any) {
+      return `Error storing secret: ${err.message}`;
+    }
   }
 
   /**
