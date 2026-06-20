@@ -13,6 +13,7 @@
 import type { Client, Guild, TextChannel } from 'discord.js';
 import { cleanSpeechContent, resolveMentions, splitMessage } from '../utils/index.js';
 import type { StreamManager, StreamInfo } from '../stream-manager.js';
+import type { DiscordGrpcClient } from '../client.js';
 import type { BotConfig } from '../types.js';
 
 export interface DiscordSpeechEffectorConfig {
@@ -24,6 +25,8 @@ export interface DiscordSpeechEffectorConfig {
   maxMessageLength?: number;
   botUserIdToName: Map<string, string>;
   activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
+  /** gRPC client — used to resolve content-addressed attachment blob refs. */
+  grpcClient: DiscordGrpcClient;
 }
 
 /**
@@ -39,6 +42,7 @@ export class DiscordSpeechEffector {
   private maxMessageLength?: number;
   private botUserIdToName: Map<string, string>;
   private activeTypingIntervals?: Map<string, ReturnType<typeof setInterval>>;
+  private grpcClient: DiscordGrpcClient;
 
   constructor(config: DiscordSpeechEffectorConfig) {
     this.botConfig = config.botConfig;
@@ -48,6 +52,7 @@ export class DiscordSpeechEffector {
     this.maxMessageLength = config.maxMessageLength;
     this.botUserIdToName = config.botUserIdToName;
     this.activeTypingIntervals = config.activeTypingIntervals;
+    this.grpcClient = config.grpcClient;
   }
 
   /**
@@ -110,14 +115,35 @@ export class DiscordSpeechEffector {
           cleanedContent = await resolveMentions(cleanedContent, (channel as TextChannel).guild, this.botUserIdToName);
         }
 
-        // Build file attachments from facet
+        // Build file attachments from facet.
+        //
+        // Three transport modes per attachment:
+        //  - blobId (preferred): pull bytes from the Connectome blob store via
+        //    GetBlob. Bytes never travelled through the FacetDelta broadcast.
+        //  - data as Uint8Array: legacy inline path.
+        //  - data as string: legacy inline path, base64-encoded.
         const files: Array<{ attachment: Buffer; name: string }> = [];
         if (facet.attachments?.length) {
           for (const att of facet.attachments) {
-            const buffer = att.data instanceof Uint8Array
-              ? Buffer.from(att.data)
-              : Buffer.from(att.data, 'base64');
-            files.push({ attachment: buffer, name: att.filename || 'attachment' });
+            let buffer: Buffer | null = null;
+
+            if (att.blobId) {
+              try {
+                const blob = await this.grpcClient.getBlob(att.blobId);
+                buffer = Buffer.from(blob.bytes);
+              } catch (err: any) {
+                console.warn(`[DiscordSpeechEffector:${botName}] Failed to resolve blob ${att.blobId.substring(0, 12)}...: ${err.message} — dropping attachment`);
+                continue;
+              }
+            } else if (att.data instanceof Uint8Array) {
+              buffer = Buffer.from(att.data);
+            } else if (typeof att.data === 'string') {
+              buffer = Buffer.from(att.data, 'base64');
+            }
+
+            if (buffer) {
+              files.push({ attachment: buffer, name: att.filename || 'attachment' });
+            }
           }
         }
 

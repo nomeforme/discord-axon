@@ -383,6 +383,33 @@ export class DiscordGrpcClient extends EventEmitter {
   }
 
   /**
+   * Upload binary bytes to the Connectome content-addressed blob store.
+   * Returns sha256 blob_id. Idempotent (alreadyExisted=true on dedup hit).
+   *
+   * Used by DiscordMessageReceptor.processAttachments to upload inbound
+   * Discord-CDN bytes before emitting a discord:message event with refs.
+   */
+  async putBlob(
+    bytes: Uint8Array,
+    options: { contentType: string; filename?: string; timeoutMs?: number } = { contentType: 'application/octet-stream' }
+  ): Promise<{ blobId: string; sizeBytes: number; alreadyExisted: boolean }> {
+    return this.client.putBlob(bytes, options);
+  }
+
+  /**
+   * Download a blob by its sha256 id. Throws NOT_FOUND if unknown.
+   *
+   * Used by DiscordSpeechEffector to resolve outbound speech-facet
+   * attachment refs into bytes right before delivery to Discord.
+   */
+  async getBlob(
+    blobId: string,
+    options: { timeoutMs?: number } = {}
+  ): Promise<{ blobId: string; sizeBytes: number; contentType: string; filename: string; bytes: Uint8Array }> {
+    return this.client.getBlob(blobId, options);
+  }
+
+  /**
    * Subscribe to both speech and action facets in a single gRPC stream.
    * Used by StreamManager to reduce subscription count by 50%.
    */

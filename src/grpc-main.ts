@@ -139,7 +139,8 @@ async function main(): Promise<void> {
         managedBotNames,
         maxMessageLength: operationalConfig.maxMessageLength,
         botUserIdToName: state.botUserIdToName,
-        activeTypingIntervals: bot.activeTypingIntervals
+        activeTypingIntervals: bot.activeTypingIntervals,
+        grpcClient: bot.grpcClient,
       });
       speechEffector.setup();
 

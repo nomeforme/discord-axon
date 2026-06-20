@@ -564,7 +564,14 @@ export class DiscordMessageReceptor {
   }
 
   /**
-   * Process attachments: download images and convert to base64
+   * Process attachments: download from Discord CDN, upload bytes to the
+   * Connectome content-addressed blob store, return refs (no inline bytes).
+   *
+   * This is the inbound path of the blob-store architecture: every byte
+   * travels exactly twice on the wire — from Discord CDN to this receptor,
+   * and from this receptor into the blob store. The signal:message event
+   * emitted afterwards carries only sha256 refs, so the pub/sub broadcast
+   * across all bot subscribers stays kilobyte-sized regardless of file size.
    */
   private async processAttachments(attachments: Map<string, Attachment>): Promise<Array<{
     id: string;
@@ -572,6 +579,7 @@ export class DiscordMessageReceptor {
     name?: string;
     contentType?: string;
     size: number;
+    blobId?: string;
     data?: string;
   }>> {
     const botName = this.bot.config.name;
@@ -581,6 +589,7 @@ export class DiscordMessageReceptor {
       name?: string;
       contentType?: string;
       size: number;
+      blobId?: string;
       data?: string;
     }> = [];
 
@@ -591,27 +600,30 @@ export class DiscordMessageReceptor {
       if (isImage && att.url) {
         // Download image, compress, and convert to base64
         const base64Data = await this.downloadAttachment(att.url, botName);
+        const finalContentType = base64Data ? 'image/jpeg' : contentType;
+        const blobId = await this.uploadBase64ToBlobStore(base64Data, finalContentType, att.name ?? undefined, botName);
         processed.push({
           id: att.id,
           url: att.url,
           name: att.name ?? undefined,
-          contentType: base64Data ? 'image/jpeg' : contentType,  // JPEG after compression
+          contentType: finalContentType,
           size: att.size,
-          data: base64Data ?? undefined
+          ...(blobId ? { blobId } : (base64Data ? { data: base64Data } : {})),
         });
       } else if (att.url && att.size <= FILE_MAX_BYTES) {
         // Non-image attachment: download and include as base64
         const base64Data = await this.downloadFileAttachment(att.url, botName);
+        const blobId = await this.uploadBase64ToBlobStore(base64Data, contentType || 'application/octet-stream', att.name ?? undefined, botName);
         processed.push({
           id: att.id,
           url: att.url,
           name: att.name ?? undefined,
           contentType: contentType || undefined,
           size: att.size,
-          data: base64Data ?? undefined,
+          ...(blobId ? { blobId } : (base64Data ? { data: base64Data } : {})),
         });
       } else {
-        // Too large or no URL — metadata only
+        // Too large or no URL — metadata only (no bytes to upload)
         processed.push({
           id: att.id,
           url: att.url,
@@ -623,6 +635,35 @@ export class DiscordMessageReceptor {
     }
 
     return processed;
+  }
+
+  /**
+   * Upload base64-encoded bytes to the Connectome blob store. Returns the
+   * sha256 blob_id on success, null on failure (caller falls back to inline).
+   */
+  private async uploadBase64ToBlobStore(
+    base64Data: string | null,
+    contentType: string,
+    filename: string | undefined,
+    botName: string
+  ): Promise<string | null> {
+    if (!base64Data) return null;
+    try {
+      const bytes = Buffer.from(base64Data, 'base64');
+      const result = await this.bot.grpcClient.putBlob(new Uint8Array(bytes), {
+        contentType,
+        filename,
+      });
+      if (result.alreadyExisted) {
+        console.log(`[DiscordMessageReceptor:${botName}] Blob ${result.blobId.substring(0, 12)}... already in store (dedup hit, ${bytes.length} bytes)`);
+      } else {
+        console.log(`[DiscordMessageReceptor:${botName}] Uploaded blob ${result.blobId.substring(0, 12)}... (${bytes.length} bytes, ${contentType})`);
+      }
+      return result.blobId;
+    } catch (err: any) {
+      console.warn(`[DiscordMessageReceptor:${botName}] Blob upload failed for ${filename || '?'}: ${err.message} — will fall back to inline bytes`);
+      return null;
+    }
   }
 
   /**
