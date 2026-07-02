@@ -39,6 +39,8 @@ export class DiscordCommandEffector {
   private maxOutputTokensOverride: number | undefined;
   /** Tracks the last-set historyDefault override (mirrors bot-runtime's ConnectomeBridge state). */
   private historyDefaultOverride: number | undefined;
+  /** Tracks the last-set TTS enable state (axon-local mirror of bot-runtime's effector state). */
+  private ttsEnabledOverride: boolean | undefined;
 
   constructor(botName: string) {
     this.botName = botName;
@@ -109,6 +111,9 @@ export class DiscordCommandEffector {
       case '!secret':
         return this.handleSecret(args);
 
+      case '!tts':
+        return this.handleTTS(args, emitEvent);
+
       default:
         return null; // Not a recognized command
     }
@@ -166,6 +171,11 @@ export class DiscordCommandEffector {
   - Bot must call \`continue_substream\` tool to get another cycle (no call = loop ends)
   - \`--stream <name>\` = shorthand: enter stream + enable autotrigger
   - \`--max-speech-only <N>\` = safety net: eject after N idle cycles (default: 5)
+
+\`!tts [on|off]\` - Toggle text-to-speech audio attachment (per-bot)
+  - Attaches synthesized voice audio to the bot's final message
+  - Only works on bots configured with a TTS provider
+  - No argument shows current state
 
 \`!secret <name> <value>\` - Store a secret (never reaches VEIL)
   - \`!secret HF_TOKEN hf_abc123\` = store
@@ -442,6 +452,50 @@ export class DiscordCommandEffector {
     return value === undefined
       ? `History default for ${this.botName} disabled — full history sent to API`
       : `History default for ${this.botName} set to ${value} (each activation trims to last ${value} + trigger)`;
+  }
+
+  /**
+   * !tts — enable/disable audio attachment on this bot's final message.
+   *
+   * Per-bot: emits `bot:config` with `ttsEnabled` so the bot-runtime effector
+   * flips its runtime state. If the target bot has no TTS provider configured,
+   * bot-runtime logs the ignore — the axon still confirms the command locally
+   * (best-effort UX; the axon can't inspect the bot's provider config).
+   *
+   * Usage: `!tts on`, `!tts off`, `!tts` (show current)
+   */
+  private handleTTS(
+    args: string,
+    emitEvent?: EmitEventCallback
+  ): string {
+    const arg = args.trim().toLowerCase();
+
+    if (!arg) {
+      if (this.ttsEnabledOverride === undefined) {
+        return `TTS for ${this.botName}: using bot-config default (on iff provider configured, off otherwise)`;
+      }
+      return `TTS for ${this.botName}: ${this.ttsEnabledOverride ? 'on' : 'off'}`;
+    }
+
+    let enabled: boolean;
+    if (arg === 'on' || arg === 'enable' || arg === 'true' || arg === '1') {
+      enabled = true;
+    } else if (arg === 'off' || arg === 'disable' || arg === 'false' || arg === '0') {
+      enabled = false;
+    } else {
+      return 'Usage: !tts on|off';
+    }
+
+    this.ttsEnabledOverride = enabled;
+
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        ttsEnabled: enabled,
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit !tts:`, e.message));
+    }
+
+    return `TTS for ${this.botName} ${enabled ? 'enabled' : 'disabled'} (no effect if bot has no TTS provider)`;
   }
 
   /**
