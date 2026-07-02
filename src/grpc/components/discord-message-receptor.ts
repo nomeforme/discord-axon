@@ -167,12 +167,21 @@ export class DiscordMessageReceptor {
         commandAttachments = await this.processAttachments(message.attachments);
       }
 
+      // For !sysprompt, resolve the first text/* attachment to a UTF-8 string
+      // so the effector can install it as the new prompt without needing a
+      // gRPC client. Pre-resolves both inline data and blob-store refs.
+      let sysPromptFileText: string | undefined;
+      if (contentWithoutMentions.toLowerCase().startsWith('!sysprompt') && message.attachments.size > 0) {
+        sysPromptFileText = await this.resolveSysPromptAttachment(message.attachments);
+      }
+
       const response = this.commandEffector.handleCommand(
         message.content,
         this.state.runtimeConfig,
         this.updateConfig,
         (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
-        commandAttachments
+        commandAttachments,
+        sysPromptFileText,
       );
       if (response) {
         try {
@@ -573,6 +582,59 @@ export class DiscordMessageReceptor {
    * emitted afterwards carries only sha256 refs, so the pub/sub broadcast
    * across all bot subscribers stays kilobyte-sized regardless of file size.
    */
+  /**
+   * Resolve the first text/* attachment in the message to a UTF-8 string.
+   *
+   * Used by `!sysprompt <mode> file` to load a system prompt from an attached
+   * file. Downloads bytes directly from the Discord CDN URL — bypasses the
+   * usual blob-store upload since the effector doesn't have a gRPC client
+   * and the bytes only live in axon memory for the duration of this call.
+   *
+   * Silently skips images / binaries / oversized files. Returns undefined if
+   * no suitable attachment is found or the download fails.
+   */
+  private async resolveSysPromptAttachment(
+    attachments: Map<string, Attachment>,
+  ): Promise<string | undefined> {
+    const MAX_TEXT_BYTES = 64 * 1024; // 64 KB — plenty for a system prompt
+    const botName = this.bot.config.name;
+
+    for (const [, att] of attachments) {
+      const ct = (att.contentType || '').toLowerCase();
+      const nameLower = (att.name || '').toLowerCase();
+      const isText =
+        ct.startsWith('text/') ||
+        /\.(txt|md|markdown|prompt)$/i.test(nameLower);
+      if (!isText) continue;
+      if (att.size > MAX_TEXT_BYTES) {
+        console.warn(
+          `[DiscordMessageReceptor:${botName}] Skipping sysprompt attachment ${att.name}: ${att.size} bytes > ${MAX_TEXT_BYTES} limit`,
+        );
+        continue;
+      }
+      if (!att.url) continue;
+      try {
+        const res = await fetch(att.url);
+        if (!res.ok) {
+          console.warn(
+            `[DiscordMessageReceptor:${botName}] Sysprompt attachment fetch failed: ${res.status} ${res.statusText}`,
+          );
+          continue;
+        }
+        const text = await res.text();
+        console.log(
+          `[DiscordMessageReceptor:${botName}] Resolved sysprompt attachment ${att.name} (${text.length} chars)`,
+        );
+        return text;
+      } catch (err: any) {
+        console.warn(
+          `[DiscordMessageReceptor:${botName}] Sysprompt attachment download error: ${err.message}`,
+        );
+      }
+    }
+    return undefined;
+  }
+
   private async processAttachments(attachments: Map<string, Attachment>): Promise<Array<{
     id: string;
     url: string;
