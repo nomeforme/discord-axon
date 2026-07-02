@@ -37,6 +37,8 @@ export class DiscordCommandEffector {
   private botName: string;
   /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
   private maxOutputTokensOverride: number | undefined;
+  /** Tracks the last-set historyDefault override (mirrors bot-runtime's ConnectomeBridge state). */
+  private historyDefaultOverride: number | undefined;
 
   constructor(botName: string) {
     this.botName = botName;
@@ -89,6 +91,9 @@ export class DiscordCommandEffector {
       case '!mt':
         return this.handleMaxTokens(args, emitEvent);
 
+      case '!h-default':
+        return this.handleHistoryDefault(args, emitEvent);
+
       case '!stop':
         return this.handleStop(emitEvent);
 
@@ -139,6 +144,11 @@ export class DiscordCommandEffector {
   - 0 = reset to model default
   - Mention a specific bot to target it
   - No argument shows current setting
+
+\`!h-default [N|off]\` - Persistent history trim (per-bot)
+  - Applies !hN to every activation so only last N + trigger reach the API
+  - \`off\` disables (full history); no arg shows current setting
+  - Per-message override: prefix any message with \`!h<N>\` for one-shot trim
 
 \`!continue\` - Continue from the bot's last message (prefill)
   - Also: \`m continue\`, \`m go\`, \`m more\`
@@ -391,6 +401,47 @@ export class DiscordCommandEffector {
       return `Max output tokens for ${this.botName} reset to model default`;
     }
     return `Max output tokens for ${this.botName} set to ${value}`;
+  }
+
+  /**
+   * !h-default — persistent history trim default. When set, every activation
+   * on this bot trims the API context to the last N+1 messages (N history +
+   * trigger), same as prefixing every message with !h<N>. `off` disables.
+   * Individual messages can still use !h<N> to override for that turn only.
+   */
+  private handleHistoryDefault(
+    args: string,
+    emitEvent?: EmitEventCallback
+  ): string {
+    if (!args) {
+      return this.historyDefaultOverride === undefined
+        ? `History default for ${this.botName}: off (full history sent)`
+        : `History default for ${this.botName}: ${this.historyDefaultOverride} messages of prior history`;
+    }
+
+    const lower = args.toLowerCase();
+    let value: number | undefined;
+    if (lower === 'off' || lower === 'disable' || lower === 'none') {
+      value = undefined;
+    } else {
+      const n = parseInt(args, 10);
+      if (isNaN(n) || n < 0) {
+        return 'Usage: !h-default <N|off> (N >= 0 for last-N-messages of history)';
+      }
+      value = n;
+    }
+    this.historyDefaultOverride = value;
+
+    if (emitEvent) {
+      emitEvent('bot:config', {
+        targetAgent: this.botName,
+        historyDefault: value ?? null,
+      }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit h-default:`, e.message));
+    }
+
+    return value === undefined
+      ? `History default for ${this.botName} disabled — full history sent to API`
+      : `History default for ${this.botName} set to ${value} (each activation trims to last ${value} + trigger)`;
   }
 
   /**
