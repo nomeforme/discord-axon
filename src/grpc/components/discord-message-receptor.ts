@@ -253,7 +253,9 @@ export class DiscordMessageReceptor {
       // Never emit messages from known bots
       shouldEmit = false;
     } else if (priorityEmitter) {
-      // Attachment + targeted case: only priority emitter emits
+      // Attachment + targeted case: only priority emitter emits (attachment
+      // processing is expensive, and every targeted bot activating with the
+      // attachment would compress/upload it N times).
       if (botName === priorityEmitter) {
         shouldEmit = true;
         console.log(`[DiscordMessageReceptor:${botName}] I am priority emitter for attachment message`);
@@ -264,8 +266,23 @@ export class DiscordMessageReceptor {
       } else {
         console.log(`[DiscordMessageReceptor:${botName}] Not priority emitter, ${priorityEmitter} will emit`);
       }
+    } else if (targetedBotNames.length > 0) {
+      // Targeted (non-attachment) case: every targeted bot emits its own copy
+      // of the message. The server dedupes on the facet ID (`msg-discord-<id>`)
+      // so only the first emit creates a frame — subsequent emits no-op
+      // server-side but still receive `waitForFrame` acknowledgment.
+      //
+      // Why: previously non-emit-winning targeted bots called `activateAgent`
+      // immediately, which raced the winner's `emitDiscordMessage`. If the
+      // activation reached the server before the message facet landed, the
+      // rendered context omitted the trigger — the bot then saw "quiet
+      // activation" (its own last reply as the newest visible message).
+      // Every targeted bot doing its own emit turns the race into a
+      // per-bot sequential barrier: emit awaits frame, then activate.
+      shouldEmit = targetedBotNames.includes(botName);
     } else {
-      // Normal case: use deduplication lottery
+      // Untargeted (random-reply / passive) case: fall back to lottery. Only
+      // one bot needs to emit since no bot is guaranteed to activate.
       shouldEmit = messageDeduplicator.shouldEmit(message.id, botName);
     }
 
