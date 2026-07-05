@@ -284,12 +284,21 @@ export class DiscordGrpcClient extends EventEmitter {
     added: boolean;
     timestamp: number;
   }): Promise<{ success: boolean }> {
+    // Compute the same streamId scheme as emitDiscordMessage so the redaction
+    // frame on the server side lands in the target stream's direct-frame
+    // budget (not the demoted ambient bucket). Without this, hiding silently
+    // fails in busy channels — see event-handler.ts reaction handler notes.
+    const streamId = reaction.guildId
+      ? `discord:${reaction.guildId}:${reaction.channelId}`
+      : `discord:dm:${reaction.channelId}`;
+
     const result = await this.client.emitEvent(
       'discord:reaction',
-      reaction,
+      { ...reaction, streamId, streamType: 'discord' },
       {
         priority: 'low',
-        waitForFrame: false
+        waitForFrame: false,
+        metadata: { channelId: reaction.channelId, streamId }
       }
     );
 

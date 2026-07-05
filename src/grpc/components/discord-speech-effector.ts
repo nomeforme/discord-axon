@@ -147,21 +147,45 @@ export class DiscordSpeechEffector {
           }
         }
 
-        // Split if too long — attach files to first chunk only
+        // Split if too long — attach files to first chunk only.
+        //
+        // We capture the returned Message from each `channel.send` so we can
+        // register `msg-discord-<sentMessageId>` → speech facet alias with the
+        // server. That lets a user react 🫥 to the bot's own message and have
+        // the reaction handler locate the speech facet (which lives under
+        // `speech-<eventId>`, not `msg-discord-*`, so the primary lookup would
+        // otherwise miss). Each chunk becomes its own Discord message with its
+        // own id, so we register all of them.
+        const sentMessageIds: string[] = [];
         const chunks = cleanedContent ? splitMessage(cleanedContent, this.maxMessageLength) : [];
         if (chunks.length === 0 && files.length > 0) {
           // Attachment-only message (no text)
-          await channel.send({ files });
+          const sent = await channel.send({ files });
+          if (sent?.id) sentMessageIds.push(sent.id);
         } else {
           for (let i = 0; i < chunks.length; i++) {
-            if (i === 0 && files.length > 0) {
-              await channel.send({ content: chunks[i], files });
-            } else {
-              await channel.send(chunks[i]);
-            }
+            const sent = (i === 0 && files.length > 0)
+              ? await channel.send({ content: chunks[i], files })
+              : await channel.send(chunks[i]);
+            if (sent?.id) sentMessageIds.push(sent.id);
           }
         }
         console.log(`[DiscordSpeechEffector:${botName}] Sent ${chunks.length || (files.length > 0 ? 1 : 0)} chunk(s)${files.length > 0 ? ` with ${files.length} attachment(s)` : ''}`);
+
+        // Register speech-facet aliases for redaction. Fire-and-forget — if
+        // the emit fails, the worst outcome is that 🫥 on this specific
+        // message won't take effect; hiding via `!` commands / web still works.
+        if (facet?.id) {
+          for (const mid of sentMessageIds) {
+            this.grpcClient.emitEvent('agent:speech:delivered', {
+              facetId: facet.id,
+              platform: 'discord',
+              platformMessageId: mid,
+            }, { priority: 'low', waitForFrame: false }).catch((err: any) => {
+              console.warn(`[DiscordSpeechEffector:${botName}] Failed to register speech alias ${mid}: ${err.message}`);
+            });
+          }
+        }
 
         // Typing indicator management:
         // - cyclePending=true (per-turn): let the existing 8s interval handle refresh.
