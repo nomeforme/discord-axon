@@ -45,8 +45,6 @@ export class DiscordCommandEffector {
   private botName: string;
   /** Tracks the last-set maxOutputTokens override (axon-local, per command effector instance) */
   private maxOutputTokensOverride: number | undefined;
-  /** Tracks the last-set historyDefault override (mirrors bot-runtime's ConnectomeBridge state). */
-  private historyDefaultOverride: number | undefined;
   /** Tracks the last-set TTS enable state (axon-local mirror of bot-runtime's effector state). */
   private ttsEnabledOverride: boolean | undefined;
 
@@ -75,6 +73,8 @@ export class DiscordCommandEffector {
      * calling this method, keeping handleCommand fully synchronous.
      */
     sysPromptFileText?: string,
+    /** Connectome streamId of the triggering message — required for per-stream commands like !h-default. */
+    streamId?: string,
   ): string | null {
     // Strip leading mentions
     let cleaned = message.trim();
@@ -108,7 +108,7 @@ export class DiscordCommandEffector {
         return this.handleMaxTokens(args, emitEvent);
 
       case '!h-default':
-        return this.handleHistoryDefault(args, emitEvent);
+        return this.handleHistoryDefault(args, emitEvent, streamId);
 
       case '!stop':
         return this.handleStop(emitEvent);
@@ -167,7 +167,7 @@ export class DiscordCommandEffector {
   - Mention a specific bot to target it
   - No argument shows current setting
 
-\`!h-default [N|off]\` - Persistent history trim (per-bot)
+\`!h-default [N|off]\` - Persistent history trim (per-stream)
   - Applies !hN to every activation so only last N + trigger reach the API
   - \`off\` disables (full history); no arg shows current setting
   - Per-message override: prefix any message with \`!h<N>\` for one-shot trim
@@ -438,19 +438,31 @@ export class DiscordCommandEffector {
   }
 
   /**
-   * !h-default — persistent history trim default. When set, every activation
-   * on this bot trims the API context to the last N+1 messages (N history +
-   * trigger), same as prefixing every message with !h<N>. `off` disables.
-   * Individual messages can still use !h<N> to override for that turn only.
+   * !h-default — persistent, PER-STREAM history trim default. When set, every
+   * activation of this bot IN THIS STREAM trims the API context to the last
+   * N+1 messages (N history + trigger), same as prefixing every message with
+   * !h<N>. `off` disables it for this stream. Individual messages can still
+   * use !h<N> to override for that turn only.
+   *
+   * Scope is the connectome streamId (platform-agnostic) — a default set in
+   * one channel never leaks into another. Persisted per-stream in the bot's
+   * overlay file so it survives restarts; bot-runtime seeds it at boot and
+   * stays live via the emitted `bot:config` event (streamId auto-stamped).
    */
   private handleHistoryDefault(
     args: string,
-    emitEvent?: EmitEventCallback
+    emitEvent?: EmitEventCallback,
+    streamId?: string,
   ): string {
+    if (!streamId) {
+      return 'Cannot set history default — no stream context for this command.';
+    }
+
     if (!args) {
-      return this.historyDefaultOverride === undefined
-        ? `History default for ${this.botName}: off (full history sent)`
-        : `History default for ${this.botName}: ${this.historyDefaultOverride} messages of prior history`;
+      const cur = this.readOverlay().historyDefaults?.[streamId];
+      return typeof cur === 'number'
+        ? `History default for ${this.botName} in this stream: ${cur} messages of prior history`
+        : `History default for ${this.botName} in this stream: off (full history sent)`;
     }
 
     const lower = args.toLowerCase();
@@ -464,18 +476,26 @@ export class DiscordCommandEffector {
       }
       value = n;
     }
-    this.historyDefaultOverride = value;
+
+    try {
+      this.setStreamHistoryDefault(streamId, value);
+    } catch (err: any) {
+      return `Failed to persist history default for ${this.botName}: ${err.message}`;
+    }
 
     if (emitEvent) {
+      // streamId is auto-stamped by the receptor's emit wrapper; include it
+      // explicitly too so the per-stream mapping is unambiguous.
       emitEvent('bot:config', {
         targetAgent: this.botName,
         historyDefault: value ?? null,
+        streamId,
       }).catch((e: any) => console.error(`[DiscordCommandEffector:${this.botName}] Failed to emit h-default:`, e.message));
     }
 
     return value === undefined
-      ? `History default for ${this.botName} disabled — full history sent to API`
-      : `History default for ${this.botName} set to ${value} (each activation trims to last ${value} + trigger)`;
+      ? `History default for ${this.botName} disabled in this stream — full history sent to API`
+      : `History default for ${this.botName} set to ${value} in this stream (each activation trims to last ${value} + trigger)`;
   }
 
   /**
@@ -635,27 +655,69 @@ export class DiscordCommandEffector {
     return `System prompt for ${this.botName}: using config.json baseline (no persistent override). Temporary in-memory overrides are not readable from the axon.`;
   }
 
-  /** Atomic overlay write: tmp file + rename. */
-  private writeOverlay(prompt: string): void {
+  /**
+   * Read the current overlay object (fail-open to `{}`). The overlay is a
+   * shared per-bot JSON holding `prompt` (from !sysprompt) and
+   * `historyDefaults` (from !h-default) — helpers must merge, never clobber.
+   */
+  private readOverlay(): Record<string, any> {
+    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
+    try {
+      if (existsSync(overlayPath)) {
+        return JSON.parse(readFileSync(overlayPath, 'utf8')) || {};
+      }
+    } catch { /* corrupt/unreadable — treat as empty */ }
+    return {};
+  }
+
+  /** Atomic overlay write: tmp file + rename. Drops the file if empty. */
+  private writeOverlayObject(overlay: Record<string, any>): void {
+    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
+    // Empty (only bookkeeping left) → remove the file entirely.
+    const meaningful = Object.keys(overlay).filter((k) => k !== 'updatedAt');
+    if (meaningful.length === 0) {
+      try { unlinkSync(overlayPath); } catch { /* not present */ }
+      return;
+    }
     try {
       mkdirSync(OVERLAY_DIR, { recursive: true });
     } catch { /* already exists */ }
-    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
     const tmpPath = `${overlayPath}.tmp`;
-    const body = JSON.stringify({ prompt, updatedAt: Date.now() }, null, 2);
-    writeFileSync(tmpPath, body, { mode: 0o644 });
+    overlay.updatedAt = Date.now();
+    writeFileSync(tmpPath, JSON.stringify(overlay, null, 2), { mode: 0o644 });
     renameSync(tmpPath, overlayPath);
-    console.log(`[DiscordCommandEffector:${this.botName}] Persisted sysprompt overlay to ${overlayPath} (${prompt.length} chars)`);
   }
 
+  /** Persist the system prompt into the overlay, preserving other keys. */
+  private writeOverlay(prompt: string): void {
+    const overlay = this.readOverlay();
+    overlay.prompt = prompt;
+    this.writeOverlayObject(overlay);
+    console.log(`[DiscordCommandEffector:${this.botName}] Persisted sysprompt overlay (${prompt.length} chars)`);
+  }
+
+  /** Clear ONLY the system prompt from the overlay (used by !sysprompt reset). */
   private deleteOverlay(): void {
-    const overlayPath = join(OVERLAY_DIR, `${this.botName}.json`);
-    try {
-      unlinkSync(overlayPath);
-      console.log(`[DiscordCommandEffector:${this.botName}] Deleted sysprompt overlay ${overlayPath}`);
-    } catch {
-      /* not present — no-op */
-    }
+    const overlay = this.readOverlay();
+    delete overlay.prompt;
+    this.writeOverlayObject(overlay);
+    console.log(`[DiscordCommandEffector:${this.botName}] Cleared sysprompt from overlay (history defaults preserved)`);
+  }
+
+  /** Set/clear a per-stream history default in the overlay, preserving other keys. */
+  private setStreamHistoryDefault(streamId: string, value: number | undefined): void {
+    const overlay = this.readOverlay();
+    const map: Record<string, number> =
+      overlay.historyDefaults && typeof overlay.historyDefaults === 'object' ? overlay.historyDefaults : {};
+    if (value === undefined) delete map[streamId];
+    else map[streamId] = value;
+    if (Object.keys(map).length > 0) overlay.historyDefaults = map;
+    else delete overlay.historyDefaults;
+    this.writeOverlayObject(overlay);
+    console.log(
+      `[DiscordCommandEffector:${this.botName}] history default for ${streamId} ` +
+        `${value === undefined ? 'cleared' : `set to ${value}`} (persisted)`,
+    );
   }
 
   /**

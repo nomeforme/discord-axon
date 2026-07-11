@@ -182,6 +182,7 @@ export class DiscordMessageReceptor {
         (topic, payload) => this.bot.grpcClient.emitEvent(topic, { ...payload, streamId }),
         commandAttachments,
         sysPromptFileText,
+        streamId,
       );
       if (response) {
         try {
