@@ -139,6 +139,7 @@ export class DiscordMessageReceptor {
           streamType: 'discord',
           targetBot: this.bot.config.agentName || botName,
           continuation: 'true',
+          ...this.mcfMetadata(streamId, botName),
         });
         console.log(`[DiscordMessageReceptor:${botName}] Continuation activation sent for stream ${streamId}`);
       } catch (error: any) {
@@ -183,6 +184,7 @@ export class DiscordMessageReceptor {
         commandAttachments,
         sysPromptFileText,
         streamId,
+        thisBotMentioned,
       );
       if (response) {
         try {
@@ -514,11 +516,24 @@ export class DiscordMessageReceptor {
         streamType: 'discord',
         targetBot: this.bot.config.agentName || botName,
         ...(processedAttachments?.length ? { attachmentsJson: JSON.stringify(processedAttachments) } : {}),
+        ...this.mcfMetadata(streamId, botName),
       });
       console.log(`[DiscordMessageReceptor:${botName}] Remote activation sent for stream ${streamId}`);
     } catch (error: any) {
       console.error(`[DiscordMessageReceptor:${botName}] Error triggering agent:`, error.message);
     }
+  }
+
+  /**
+   * Resolve a `!mcf` override for this bot on this stream and shape it as
+   * activation metadata. Bot-specific entry wins over the stream-wide '*'
+   * entry; no entry → empty object (server default applies).
+   */
+  private mcfMetadata(streamId: string, botName: string): Record<string, string> {
+    const per = this.state.runtimeConfig.mcfStreamOverrides?.[streamId];
+    if (!per) return {};
+    const value = per[this.bot.config.agentName || botName] ?? per['*'];
+    return value !== undefined ? { maxContextFrames: String(value) } : {};
   }
 
   /**

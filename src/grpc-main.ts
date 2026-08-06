@@ -80,7 +80,8 @@ async function main(): Promise<void> {
       randomReplyChance: operationalConfig.randomReplyChance,
       maxBotMentionsPerConversation: operationalConfig.maxBotMentionsPerConversation,
       maxConversationFrames: operationalConfig.maxConversationFrames,
-      maxMemoryFrames: operationalConfig.maxMemoryFrames
+      maxMemoryFrames: operationalConfig.maxMemoryFrames,
+      mcfStreamOverrides: {}
     }
   };
 
