@@ -106,13 +106,25 @@ async function main(): Promise<void> {
   // Called both at startup (env tokens) and dynamically (binding ads)
   // ========================================================================
   async function addBot(token: string, source: string, agentName?: string): Promise<string | null> {
+    // Hoisted so the catch can roll back whatever was already registered.
+    // Without this, a failure AFTER state.bots.set() (e.g. gRPC connect timing
+    // out during a connectome blip) leaves a half-built bot behind: Discord
+    // receptors live, agentHandle undefined. Messages still reach VEIL because
+    // emitDiscordMessage doesn't check the handle, but every activateAgent
+    // throws 'Not connected'. And because the entry is in state.bots, all later
+    // retries short-circuit on 'Already managed, skipping' — so the bot stays
+    // deaf until the axon restarts. Cost us claude-opus-5 on Discord for
+    // three weeks (2026-08-06 → 2026-08-29) while it looked healthy.
+    let discord: ReturnType<typeof createDiscordClient> | undefined;
+    let name: string | undefined;
+    let registered = false;
     try {
-      const discord = createDiscordClient();
-      const readyPromise = new Promise<void>((resolve) => discord.once('ready', () => resolve()));
+      discord = createDiscordClient();
+      const readyPromise = new Promise<void>((resolve) => discord!.once('ready', () => resolve()));
       await discord.login(token);
       await readyPromise;
 
-      const name = discord.user!.username;
+      name = discord.user!.username;
       const userId = discord.user!.id;
 
       // Skip if already managed
@@ -131,6 +143,7 @@ async function main(): Promise<void> {
       if (agentName) bot.config.agentName = agentName;
       state.bots.set(name, bot);
       state.botUserIdToName.set(userId, name);
+      registered = true;
 
       // Create components
       const speechEffector = new DiscordSpeechEffector({
@@ -197,9 +210,55 @@ async function main(): Promise<void> {
       return name;
     } catch (error: any) {
       console.error(`  Failed to add bot (${source}): ${error.message}`);
+      // Roll back, so a later advertisement can retry cleanly instead of being
+      // turned away by the 'Already managed' guard. Order matters: drop the
+      // registry entries first, then tear down the transports.
+      if (registered && name) {
+        const partial = state.bots.get(name);
+        state.bots.delete(name);
+        for (const [userId, botName] of state.botUserIdToName) {
+          if (botName === name) state.botUserIdToName.delete(userId);
+        }
+        managedBotNames.delete(name);
+        if (agentName) managedBotNames.delete(agentName);
+        try {
+          partial?.streamManager.unsubscribeAll();
+          partial?.grpcClient.disconnect();
+        } catch (cleanupError: any) {
+          console.error(`  Cleanup after failed add (${source}): ${cleanupError.message}`);
+        }
+        console.error(`  Rolled back partial registration for ${name} (${source})`);
+      }
+      // Always destroy the Discord client — otherwise its receptors keep
+      // listening and the bot appears online while being unable to activate.
+      try {
+        discord?.destroy();
+      } catch {
+        /* already destroyed or never logged in */
+      }
       return null;
     }
   }
+
+  /**
+   * A bot counts as healthy only if it is in state.bots AND its gRPC client
+   * actually holds an agent handle. Presence alone is not enough: that was
+   * precisely the opus-5 failure — present, receiving Discord messages, and
+   * unable to activate, because registerAgent never completed.
+   *
+   * Matches on the bot-runtime agentName or the Discord username, since
+   * bindings are keyed by the former and state.bots by the latter.
+   */
+  function isBotHealthy(agentName: string): boolean {
+    for (const [name, bot] of state.bots) {
+      if (name !== agentName && bot.config.agentName !== agentName) continue;
+      return bot.grpcClient.getAgentId() !== undefined;
+    }
+    return false;
+  }
+
+  /** Per-agent retry backoff for failed adds (see binding:added below). */
+  const addBackoff = new Map<string, { failures: number; nextAttempt: number }>();
 
   // ========================================================================
   // Step 1: Start AxonBindingServer FIRST (so bot-runtimes can connect
@@ -222,11 +281,57 @@ async function main(): Promise<void> {
         return;
       }
 
-      console.log(`[AxonBinding] Adding bot ${binding.agentName}...`);
-      await addBot(token, `binding:${binding.agentName}`, binding.agentName);
+      const agent = binding.agentName;
+
+      // Already healthy? Nothing to do. This check MUST happen before addBot,
+      // because addBot has to log into Discord before it can learn the username
+      // it keys state.bots by. Discord rate-limits IDENTIFY hard (~1000/day per
+      // bot), and the retry loop below fires every 30s — so an unguarded retry
+      // path would burn a day's budget in under nine hours.
+      if (isBotHealthy(agent)) {
+        addBackoff.delete(agent);
+        return;
+      }
+
+      const backoff = addBackoff.get(agent);
+      if (backoff && Date.now() < backoff.nextAttempt) return;
+
+      console.log(`[AxonBinding] Adding bot ${agent}...`);
+      const added = await addBot(token, `binding:${agent}`, agent);
+
+      if (added && isBotHealthy(agent)) {
+        addBackoff.delete(agent);
+        return;
+      }
+
+      // Failed. Drop the binding so the advertiser's next 30s keepalive is seen
+      // as new and re-emits — turning the existing keepalive into the retry
+      // channel — and back off so a prolonged connectome outage doesn't spend
+      // the Discord login budget.
+      const failures = (backoff?.failures ?? 0) + 1;
+      const delayMs = Math.min(30_000 * 2 ** (failures - 1), 15 * 60_000);
+      addBackoff.set(agent, { failures, nextAttempt: Date.now() + delayMs });
+      bindingServer!.forgetBinding('discord', agent);
+      console.error(
+        `[AxonBinding] ${agent} not usable after add (failure ${failures}); ` +
+        `will retry via keepalive in ~${Math.round(delayMs / 1000)}s`
+      );
     });
 
     await bindingServer.start();
+
+    // Reconciliation sweep: catch bots that are recorded as bound but have no
+    // working entry, regardless of HOW they got that way. Only forgets bindings
+    // with no healthy bot, which lets the keepalive re-add them; it never tears
+    // down a bot that is merely mid-reconnect.
+    setInterval(() => {
+      for (const b of bindingServer!.getBindings('discord')) {
+        if (isBotHealthy(b.agentName)) continue;
+        if (bindingServer!.forgetBinding('discord', b.agentName)) {
+          console.error(`[AxonBinding] Reconcile: ${b.agentName} bound but not usable — re-adding via keepalive`);
+        }
+      }
+    }, 60_000).unref?.();
   }
 
   // ========================================================================
